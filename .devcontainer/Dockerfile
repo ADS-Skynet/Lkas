@@ -73,8 +73,8 @@ RUN pip install --no-cache-dir \
     tqdm
 
 # Install PyTorch (CPU version for M1 compatibility through emulation)
-RUN pip install --no-cache-dir \
-    torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# RUN pip install --no-cache-dir \
+#     torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 # Install CARLA Python package via pip (works on x86_64 Linux)
 RUN pip install --no-cache-dir carla==${CARLA_VERSION}

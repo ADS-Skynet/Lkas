@@ -10,8 +10,8 @@ import time
 from typing import Optional
 
 from carla_interface import CARLAInterface
-from traditional.cv_lane_detector import CVLaneDetector
-from deep_learning.lane_net import DLLaneDetector
+from method.computer_vision.cv_lane_detector import CVLaneDetector
+from method.deep_learning.lane_net import DLLaneDetector
 from utils.lane_analyzer import LaneAnalyzer, LaneDepartureStatus
 from utils.visualizer import LKASVisualizer
 from utils.spectator_overlay import SpectatorOverlay
@@ -53,8 +53,12 @@ class LaneKeepingAssist:
         if detection_method == "cv":
             self.detector = CVLaneDetector()
         else:
+            # Use pre-trained model by default (no model_path needed)
+            # model_type options: 'pretrained', 'simple', 'full'
             self.detector = DLLaneDetector(
-                model_path=model_path, model_type="simple", input_size=(256, 256)
+                model_path=model_path,
+                model_type="pretrained",  # Use pre-trained U-Net
+                input_size=(256, 256)
             )
 
         # Initialize lane analyzer
@@ -151,14 +155,8 @@ class LaneKeepingAssist:
             Tuple of (visualization_image, metrics, steering_correction)
         """
         # Detect lanes
-        if self.detection_method == "cv":
-            left_lane, right_lane, debug_image = self.detector.detect(image)
-        else:
-            lane_mask, debug_image = self.detector.detect(image)
-            # For DL, we would need additional processing to extract lane lines
-            # For now, we'll use the CV method's output format
-            # TODO: Implement lane line extraction from segmentation mask
-            left_lane, right_lane = None, None
+        # Both CV and DL methods now return the same format: (left_lane, right_lane, debug_image)
+        left_lane, right_lane, debug_image = self.detector.detect(image)
 
         # Analyze lanes
         metrics = self.analyzer.get_metrics(left_lane, right_lane)
