@@ -9,9 +9,12 @@
             "program": "${workspaceFolder}/lane_detection/main.py",
             "console": "integratedTerminal",
             "args": [
-                "--method", "cv",
-                "--host", "localhost",  // Change to your Linux machine IP
-                "--port", "2000"
+                "--method",
+                "cv",
+                "--host",
+                "carla-server.local", // Change to your Linux machine IP
+                "--port",
+                "2000"
             ],
             "cwd": "${workspaceFolder}/lane_detection",
             "env": {
@@ -25,9 +28,12 @@
             "program": "${workspaceFolder}/lane_detection/main.py",
             "console": "integratedTerminal",
             "args": [
-                "--method", "dl",
-                "--host", "localhost",
-                "--port", "2000"
+                "--method",
+                "dl",
+                "--host",
+                "localhost",
+                "--port",
+                "2000"
             ],
             "cwd": "${workspaceFolder}/lane_detection"
         },
@@ -38,8 +44,10 @@
             "program": "${workspaceFolder}/lane_detection/test_carla_connection.py",
             "console": "integratedTerminal",
             "args": [
-                "--host", "localhost",  // Change to your Linux machine IP
-                "--port", "2000"
+                "--host",
+                "carla-server.local", // Change to your Linux machine IP
+                "--port",
+                "2000"
             ],
             "cwd": "${workspaceFolder}/lane_detection"
         },
