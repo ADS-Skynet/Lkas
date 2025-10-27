@@ -7,20 +7,25 @@ Manages the data flow: CARLA → Detection → Decision → CARLA
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import time
 from typing import Optional
 import cv2
 
-from modules.carla_module import CARLAConnection, VehicleManager, CameraSensor
-from modules.detection_module import LaneDetectionModule
-from modules.decision_module import DecisionController
-from integration.messages import (
-    ImageMessage, DetectionMessage, ControlMessage,
-    SystemStatus, PerformanceMetrics, ControlMode
+from simulation import CARLAConnection, VehicleManager, CameraSensor
+from detection.detection_module import LaneDetectionModule
+from decision import DecisionController
+from detection.integration.messages import (
+    ImageMessage,
+    DetectionMessage,
+    ControlMessage,
+    SystemStatus,
+    PerformanceMetrics,
+    ControlMode,
 )
-from core.config import Config
+from detection.core.config import Config
 
 
 class SystemOrchestrator:
@@ -36,7 +41,7 @@ class SystemOrchestrator:
         CARLA (image) → Detection (lanes) → Decision (control) → CARLA (actuate)
     """
 
-    def __init__(self, config: Config, detection_method: str = 'cv'):
+    def __init__(self, config: Config, detection_method: str = "cv"):
         """
         Initialize system orchestrator.
 
@@ -63,10 +68,12 @@ class SystemOrchestrator:
         self.detection_module: Optional[LaneDetectionModule] = None
         self.decision_controller: Optional[DecisionController] = None
 
-    def initialize(self,
-                   carla_host: str = 'localhost',
-                   carla_port: int = 2000,
-                   spawn_point: Optional[int] = None) -> bool:
+    def initialize(
+        self,
+        carla_host: str = "localhost",
+        carla_port: int = 2000,
+        spawn_point: Optional[int] = None,
+    ) -> bool:
         """
         Initialize all modules.
 
@@ -78,9 +85,9 @@ class SystemOrchestrator:
         Returns:
             True if all modules initialized successfully
         """
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("Initializing Lane Keeping System")
-        print("="*60)
+        print("=" * 60)
 
         # 1. Initialize CARLA connection
         print("\n[1/5] Connecting to CARLA...")
@@ -93,8 +100,7 @@ class SystemOrchestrator:
         print("\n[2/5] Spawning vehicle...")
         self.vehicle_manager = VehicleManager(self.carla_connection.get_world())
         if not self.vehicle_manager.spawn_vehicle(
-            vehicle_type=self.config.carla.vehicle_type,
-            spawn_point_index=spawn_point
+            vehicle_type=self.config.carla.vehicle_type, spawn_point_index=spawn_point
         ):
             return False
         self.status.vehicle_spawned = True
@@ -102,15 +108,14 @@ class SystemOrchestrator:
         # 3. Setup camera
         print("\n[3/5] Setting up camera...")
         self.camera_sensor = CameraSensor(
-            self.carla_connection.get_world(),
-            self.vehicle_manager.get_vehicle()
+            self.carla_connection.get_world(), self.vehicle_manager.get_vehicle()
         )
         if not self.camera_sensor.setup_camera(
             width=self.config.camera.width,
             height=self.config.camera.height,
             fov=self.config.camera.fov,
             position=self.config.camera.position,
-            rotation=self.config.camera.rotation
+            rotation=self.config.camera.rotation,
         ):
             return False
         self.status.camera_ready = True
@@ -126,13 +131,13 @@ class SystemOrchestrator:
             image_width=self.config.camera.width,
             image_height=self.config.camera.height,
             kp=self.config.controller.kp,
-            kd=self.config.controller.kd
+            kd=self.config.controller.kd,
         )
         self.status.controller_ready = True
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("✓ All modules initialized successfully")
-        print("="*60)
+        print("=" * 60)
 
         return True
 
@@ -154,9 +159,9 @@ class SystemOrchestrator:
             print("\n✓ Autopilot enabled")
 
         self.running = True
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("System Running - Press 'q' to quit")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
 
         try:
             while self.running:
@@ -169,7 +174,7 @@ class SystemOrchestrator:
                 # Handle keyboard
                 if show_visualization:
                     key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q'):
+                    if key == ord("q"):
                         print("\nQuitting...")
                         break
 
@@ -187,9 +192,7 @@ class SystemOrchestrator:
 
         # Create image message
         image_msg = ImageMessage(
-            image=image,
-            timestamp=time.time(),
-            frame_id=self.metrics.total_frames
+            image=image, timestamp=time.time(), frame_id=self.metrics.total_frames
         )
 
         # Step 2: Detect lanes
@@ -209,7 +212,7 @@ class SystemOrchestrator:
             self.vehicle_manager.apply_control(
                 steering=control_msg.steering,
                 throttle=control_msg.throttle,
-                brake=control_msg.brake
+                brake=control_msg.brake,
             )
 
         # Step 5: Visualization
@@ -217,12 +220,33 @@ class SystemOrchestrator:
             vis_image = detection_msg.debug_image.copy()
 
             # Add FPS and metrics
-            cv2.putText(vis_image, f"FPS: {self.metrics.fps:.1f}",
-                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            cv2.putText(vis_image, f"Detection: {detection_time:.1f}ms",
-                       (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            cv2.putText(vis_image, f"Steering: {control_msg.steering:.3f}",
-                       (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(
+                vis_image,
+                f"FPS: {self.metrics.fps:.1f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+            )
+            cv2.putText(
+                vis_image,
+                f"Detection: {detection_time:.1f}ms",
+                (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+            )
+            cv2.putText(
+                vis_image,
+                f"Steering: {control_msg.steering:.3f}",
+                (10, 90),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+            )
 
             cv2.imshow("Lane Keeping System", vis_image)
 
@@ -249,18 +273,20 @@ class SystemOrchestrator:
 
     def _print_status(self, detection: DetectionMessage, control: ControlMessage):
         """Print periodic status update."""
-        print(f"Frame {self.metrics.total_frames:5d} | "
-              f"FPS: {self.metrics.fps:5.1f} | "
-              f"Lanes: {'L' if detection.left_lane else '-'}"
-              f"{'R' if detection.right_lane else '-'} | "
-              f"Steering: {control.steering:+.3f} | "
-              f"Offset: {control.lateral_offset:.3f if control.lateral_offset else 'N/A'}")
+        print(
+            f"Frame {self.metrics.total_frames:5d} | "
+            f"FPS: {self.metrics.fps:5.1f} | "
+            f"Lanes: {'L' if detection.left_lane else '-'}"
+            f"{'R' if detection.right_lane else '-'} | "
+            f"Steering: {control.steering:+.3f} | "
+            f"Offset: {control.lateral_offset:.3f if control.lateral_offset else 'N/A'}"
+        )
 
     def shutdown(self):
         """Shutdown all modules and cleanup resources."""
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("Shutting down system...")
-        print("="*60)
+        print("=" * 60)
 
         if self.camera_sensor:
             self.camera_sensor.destroy_camera()

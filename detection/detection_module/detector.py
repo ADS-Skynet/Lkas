@@ -6,15 +6,16 @@ Standalone detector that processes images and returns lane detection results.
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import numpy as np
 import time
 from typing import Optional
 
-from integration.messages import ImageMessage, DetectionMessage, LaneMessage
-from core.factory import DetectorFactory
-from core.config import Config
+from detection.integration.messages import ImageMessage, DetectionMessage, LaneMessage
+from detection.core.factory import DetectorFactory
+from detection.core.config import Config
 
 
 class LaneDetectionModule:
@@ -27,7 +28,7 @@ class LaneDetectionModule:
     - Return structured detection results
     """
 
-    def __init__(self, config: Config, method: str = 'cv'):
+    def __init__(self, config: Config, method: str = "cv"):
         """
         Initialize lane detection module.
 
@@ -69,7 +70,7 @@ class LaneDetectionModule:
                 y1=result.left_lane.y1,
                 x2=result.left_lane.x2,
                 y2=result.left_lane.y2,
-                confidence=result.left_lane.confidence
+                confidence=result.left_lane.confidence,
             )
 
         if result.right_lane:
@@ -78,7 +79,7 @@ class LaneDetectionModule:
                 y1=result.right_lane.y1,
                 x2=result.right_lane.x2,
                 y2=result.right_lane.y2,
-                confidence=result.right_lane.confidence
+                confidence=result.right_lane.confidence,
             )
 
         # Create detection message
@@ -88,7 +89,7 @@ class LaneDetectionModule:
             processing_time_ms=result.processing_time_ms,
             frame_id=image_msg.frame_id,
             timestamp=image_msg.timestamp,
-            debug_image=result.debug_image
+            debug_image=result.debug_image,
         )
 
         return detection_msg

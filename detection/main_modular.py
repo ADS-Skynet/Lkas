@@ -11,8 +11,12 @@ The Orchestrator coordinates data flow between modules.
 
 import argparse
 import sys
-from core.config import ConfigManager
-from integration.orchestrator import SystemOrchestrator
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from detection.core.config import ConfigManager
+from detection.integration.orchestrator import SystemOrchestrator
 
 
 def main():
@@ -27,41 +31,27 @@ def main():
         type=str,
         default="cv",
         choices=["cv", "dl"],
-        help="Lane detection method (cv=Computer Vision, dl=Deep Learning)"
+        help="Lane detection method (cv=Computer Vision, dl=Deep Learning)",
     )
     parser.add_argument(
-        "--config",
-        type=str,
-        default="config.yaml",
-        help="Path to configuration file"
+        "--config", type=str, default="config.yaml", help="Path to configuration file"
     )
     parser.add_argument(
-        "--host",
-        type=str,
-        default=None,
-        help="CARLA server host (overrides config)"
+        "--host", type=str, default=None, help="CARLA server host (overrides config)"
     )
     parser.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        help="CARLA server port (overrides config)"
+        "--port", type=int, default=None, help="CARLA server port (overrides config)"
     )
     parser.add_argument(
-        "--spawn-point",
-        type=int,
-        default=None,
-        help="Vehicle spawn point index"
+        "--spawn-point", type=int, default=None, help="Vehicle spawn point index"
     )
     parser.add_argument(
-        "--no-display",
-        action="store_true",
-        help="Disable visualization display"
+        "--no-display", action="store_true", help="Disable visualization display"
     )
     parser.add_argument(
         "--no-autopilot",
         action="store_true",
-        help="Disable CARLA autopilot (use lane keeping control only)"
+        help="Disable CARLA autopilot (use lane keeping control only)",
     )
 
     args = parser.parse_args()
@@ -84,17 +74,14 @@ def main():
 
     # Initialize all modules
     if not orchestrator.initialize(
-        carla_host=carla_host,
-        carla_port=carla_port,
-        spawn_point=args.spawn_point
+        carla_host=carla_host, carla_port=carla_port, spawn_point=args.spawn_point
     ):
         print("\n✗ Failed to initialize system")
         return 1
 
     # Run the system
     orchestrator.run(
-        enable_autopilot=not args.no_autopilot,
-        show_visualization=not args.no_display
+        enable_autopilot=not args.no_autopilot, show_visualization=not args.no_display
     )
 
     return 0

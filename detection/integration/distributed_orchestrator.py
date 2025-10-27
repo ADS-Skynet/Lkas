@@ -14,20 +14,25 @@ Architecture:
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import time
 from typing import Optional
 import cv2
 
-from modules.carla_module import CARLAConnection, VehicleManager, CameraSensor
-from modules.decision_module import DecisionController
-from integration.communication import DetectionClient
-from integration.messages import (
-    ImageMessage, DetectionMessage, ControlMessage,
-    SystemStatus, PerformanceMetrics, ControlMode
+from simulation import CARLAConnection, VehicleManager, CameraSensor
+from decision import DecisionController
+from detection.integration.communication import DetectionClient
+from detection.integration.messages import (
+    ImageMessage,
+    DetectionMessage,
+    ControlMessage,
+    SystemStatus,
+    PerformanceMetrics,
+    ControlMode,
 )
-from core.config import Config
+from detection.core.config import Config
 
 
 class DistributedOrchestrator:
@@ -80,11 +85,13 @@ class DistributedOrchestrator:
         self.network_timeouts = 0
         self.network_errors = 0
 
-    def initialize(self,
-                   carla_host: str = 'localhost',
-                   carla_port: int = 2000,
-                   spawn_point: Optional[int] = None,
-                   detector_timeout_ms: int = 1000) -> bool:
+    def initialize(
+        self,
+        carla_host: str = "localhost",
+        carla_port: int = 2000,
+        spawn_point: Optional[int] = None,
+        detector_timeout_ms: int = 1000,
+    ) -> bool:
         """
         Initialize all components.
 
@@ -97,9 +104,9 @@ class DistributedOrchestrator:
         Returns:
             True if all components initialized successfully
         """
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("Initializing Distributed Lane Keeping System")
-        print("="*60)
+        print("=" * 60)
         print(f"Architecture: CARLA Client <--> Detection Server")
         print(f"Detection Server: {self.detector_url}")
 
@@ -114,8 +121,7 @@ class DistributedOrchestrator:
         print("\n[2/5] Spawning vehicle...")
         self.vehicle_manager = VehicleManager(self.carla_connection.get_world())
         if not self.vehicle_manager.spawn_vehicle(
-            vehicle_type=self.config.carla.vehicle_type,
-            spawn_point_index=spawn_point
+            vehicle_type=self.config.carla.vehicle_type, spawn_point_index=spawn_point
         ):
             return False
         self.status.vehicle_spawned = True
@@ -123,15 +129,14 @@ class DistributedOrchestrator:
         # 3. Setup camera
         print("\n[3/5] Setting up camera...")
         self.camera_sensor = CameraSensor(
-            self.carla_connection.get_world(),
-            self.vehicle_manager.get_vehicle()
+            self.carla_connection.get_world(), self.vehicle_manager.get_vehicle()
         )
         if not self.camera_sensor.setup_camera(
             width=self.config.camera.width,
             height=self.config.camera.height,
             fov=self.config.camera.fov,
             position=self.config.camera.position,
-            rotation=self.config.camera.rotation
+            rotation=self.config.camera.rotation,
         ):
             return False
         self.status.camera_ready = True
@@ -140,14 +145,15 @@ class DistributedOrchestrator:
         print("\n[4/5] Connecting to detection server...")
         try:
             self.detection_client = DetectionClient(
-                server_url=self.detector_url,
-                timeout_ms=detector_timeout_ms
+                server_url=self.detector_url, timeout_ms=detector_timeout_ms
             )
             self.status.detector_ready = True
         except Exception as e:
             print(f"✗ Failed to connect to detection server: {e}")
             print(f"  Make sure detection server is running:")
-            print(f"  python detection_server.py --port {self.detector_url.split(':')[-1]}")
+            print(
+                f"  python detection_server.py --port {self.detector_url.split(':')[-1]}"
+            )
             return False
 
         # 5. Initialize decision controller
@@ -156,13 +162,13 @@ class DistributedOrchestrator:
             image_width=self.config.camera.width,
             image_height=self.config.camera.height,
             kp=self.config.controller.kp,
-            kd=self.config.controller.kd
+            kd=self.config.controller.kd,
         )
         self.status.controller_ready = True
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("✓ All components initialized successfully")
-        print("="*60)
+        print("=" * 60)
         print(f"\n📡 Network: CARLA Client <--> Detection Server")
         print(f"   Detection: {self.detector_url}")
         print(f"   Timeout: {detector_timeout_ms}ms")
@@ -187,9 +193,9 @@ class DistributedOrchestrator:
             print("\n✓ Autopilot enabled")
 
         self.running = True
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("System Running - Press 'q' to quit")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
 
         try:
             while self.running:
@@ -202,7 +208,7 @@ class DistributedOrchestrator:
                 # Handle keyboard
                 if show_visualization:
                     key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q'):
+                    if key == ord("q"):
                         print("\nQuitting...")
                         break
 
@@ -220,9 +226,7 @@ class DistributedOrchestrator:
 
         # Create image message
         image_msg = ImageMessage(
-            image=image,
-            timestamp=time.time(),
-            frame_id=self.metrics.total_frames
+            image=image, timestamp=time.time(), frame_id=self.metrics.total_frames
         )
 
         # Step 2: Send to remote detection server and receive lanes
@@ -235,10 +239,7 @@ class DistributedOrchestrator:
             self.network_timeouts += 1
             # Use safe default: no steering, apply brake
             control_msg = ControlMessage(
-                steering=0.0,
-                throttle=0.0,
-                brake=0.3,
-                mode=ControlMode.LANE_KEEPING
+                steering=0.0, throttle=0.0, brake=0.3, mode=ControlMode.LANE_KEEPING
             )
         else:
             self.metrics.detection_time_ms = detection_time
@@ -254,7 +255,7 @@ class DistributedOrchestrator:
             self.vehicle_manager.apply_control(
                 steering=control_msg.steering,
                 throttle=control_msg.throttle,
-                brake=control_msg.brake
+                brake=control_msg.brake,
             )
 
         # Step 5: Visualization (local only, don't send over network)
@@ -264,28 +265,62 @@ class DistributedOrchestrator:
 
             # Draw detected lanes if available
             if detection_msg and detection_msg.left_lane:
-                cv2.line(vis_image,
-                        (detection_msg.left_lane.x1, detection_msg.left_lane.y1),
-                        (detection_msg.left_lane.x2, detection_msg.left_lane.y2),
-                        (255, 0, 0), 5)
+                cv2.line(
+                    vis_image,
+                    (detection_msg.left_lane.x1, detection_msg.left_lane.y1),
+                    (detection_msg.left_lane.x2, detection_msg.left_lane.y2),
+                    (255, 0, 0),
+                    5,
+                )
 
             if detection_msg and detection_msg.right_lane:
-                cv2.line(vis_image,
-                        (detection_msg.right_lane.x1, detection_msg.right_lane.y1),
-                        (detection_msg.right_lane.x2, detection_msg.right_lane.y2),
-                        (0, 0, 255), 5)
+                cv2.line(
+                    vis_image,
+                    (detection_msg.right_lane.x1, detection_msg.right_lane.y1),
+                    (detection_msg.right_lane.x2, detection_msg.right_lane.y2),
+                    (0, 0, 255),
+                    5,
+                )
 
             # Add metrics
-            cv2.putText(vis_image, f"FPS: {self.metrics.fps:.1f}",
-                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(vis_image, f"Network: {detection_time:.1f}ms",
-                       (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            cv2.putText(vis_image, f"Steering: {control_msg.steering:.3f}",
-                       (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.putText(
+                vis_image,
+                f"FPS: {self.metrics.fps:.1f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),
+                2,
+            )
+            cv2.putText(
+                vis_image,
+                f"Network: {detection_time:.1f}ms",
+                (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2,
+            )
+            cv2.putText(
+                vis_image,
+                f"Steering: {control_msg.steering:.3f}",
+                (10, 90),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2,
+            )
 
             if self.network_timeouts > 0:
-                cv2.putText(vis_image, f"Timeouts: {self.network_timeouts}",
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                cv2.putText(
+                    vis_image,
+                    f"Timeouts: {self.network_timeouts}",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 0, 255),
+                    2,
+                )
 
             cv2.imshow("Lane Keeping System (Distributed)", vis_image)
 
@@ -309,24 +344,32 @@ class DistributedOrchestrator:
         self.metrics.fps = 1.0 / avg_time if avg_time > 0 else 0.0
         self._last_time = current_time
 
-    def _print_status(self, detection: Optional[DetectionMessage], control: ControlMessage):
+    def _print_status(
+        self, detection: Optional[DetectionMessage], control: ControlMessage
+    ):
         """Print periodic status update."""
-        lanes_str = "TIMEOUT" if detection is None else (
-            f"{'L' if detection.left_lane else '-'}"
-            f"{'R' if detection.right_lane else '-'}"
+        lanes_str = (
+            "TIMEOUT"
+            if detection is None
+            else (
+                f"{'L' if detection.left_lane else '-'}"
+                f"{'R' if detection.right_lane else '-'}"
+            )
         )
-        print(f"Frame {self.metrics.total_frames:5d} | "
-              f"FPS: {self.metrics.fps:5.1f} | "
-              f"Lanes: {lanes_str} | "
-              f"Network: {self.metrics.detection_time_ms:5.1f}ms | "
-              f"Steering: {control.steering:+.3f} | "
-              f"Timeouts: {self.network_timeouts}")
+        print(
+            f"Frame {self.metrics.total_frames:5d} | "
+            f"FPS: {self.metrics.fps:5.1f} | "
+            f"Lanes: {lanes_str} | "
+            f"Network: {self.metrics.detection_time_ms:5.1f}ms | "
+            f"Steering: {control.steering:+.3f} | "
+            f"Timeouts: {self.network_timeouts}"
+        )
 
     def shutdown(self):
         """Shutdown all components and cleanup resources."""
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("Shutting down distributed system...")
-        print("="*60)
+        print("=" * 60)
 
         if self.detection_client:
             self.detection_client.close()
@@ -345,6 +388,8 @@ class DistributedOrchestrator:
         print(f"\nNetwork Statistics:")
         print(f"  Total frames: {self.metrics.total_frames}")
         print(f"  Timeouts: {self.network_timeouts}")
-        print(f"  Success rate: {(1 - self.network_timeouts/max(1, self.metrics.total_frames))*100:.1f}%")
+        print(
+            f"  Success rate: {(1 - self.network_timeouts/max(1, self.metrics.total_frames))*100:.1f}%"
+        )
 
         print("\n✓ System shutdown complete")

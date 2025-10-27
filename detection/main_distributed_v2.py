@@ -24,14 +24,23 @@ Usage:
 
 import argparse
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import cv2
 import time
-from core.config import ConfigManager
-from integration.visualization import VisualizationManager, auto_select_viewer
-from modules.carla_module import CARLAConnection, VehicleManager, CameraSensor
-from modules.decision_module import DecisionController
-from integration.communication import DetectionClient
-from integration.messages import ImageMessage, DetectionMessage, ControlMessage, ControlMode
+from detection.core.config import ConfigManager
+from detection.integration.visualization import VisualizationManager, auto_select_viewer
+from simulation import CARLAConnection, VehicleManager, CameraSensor
+from decision import DecisionController
+from detection.integration.communication import DetectionClient
+from detection.integration.messages import (
+    ImageMessage,
+    DetectionMessage,
+    ControlMessage,
+    ControlMode,
+)
 
 
 def main():
@@ -42,8 +51,12 @@ def main():
 
     # System options
     parser.add_argument("--config", type=str, default="config.yaml")
-    parser.add_argument("--host", type=str, default=None, help="CARLA server host (overrides config)")
-    parser.add_argument("--port", type=int, default=None, help="CARLA server port (overrides config)")
+    parser.add_argument(
+        "--host", type=str, default=None, help="CARLA server host (overrides config)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=None, help="CARLA server port (overrides config)"
+    )
     parser.add_argument("--spawn-point", type=int, default=None)
 
     # Detection server
@@ -54,15 +67,12 @@ def main():
     parser.add_argument(
         "--viewer",
         type=str,
-        choices=['auto', 'opencv', 'pygame', 'web', 'none'],
-        default='auto',
-        help="Visualization backend (auto=auto-detect best)"
+        choices=["auto", "opencv", "pygame", "web", "none"],
+        default="auto",
+        help="Visualization backend (auto=auto-detect best)",
     )
     parser.add_argument(
-        "--web-port",
-        type=int,
-        default=8080,
-        help="Port for web viewer"
+        "--web-port", type=int, default=8080, help="Port for web viewer"
     )
     parser.add_argument("--no-display", action="store_true")
     parser.add_argument("--no-autopilot", action="store_true")
@@ -78,24 +88,24 @@ def main():
     carla_port = args.port if args.port else config.carla.port
 
     # Print banner
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("DISTRIBUTED LANE KEEPING SYSTEM - ENHANCED")
-    print("="*60)
+    print("=" * 60)
     print(f"CARLA Server: {carla_host}:{carla_port}")
     print(f"Detection Server: {args.detector_url}")
     print(f"Camera: {config.camera.width}x{config.camera.height}")
 
     # Determine viewer type
     if args.no_display:
-        viewer_type = 'none'
-    elif args.viewer == 'auto':
+        viewer_type = "none"
+    elif args.viewer == "auto":
         viewer_type = auto_select_viewer()
         print(f"Auto-selected viewer: {viewer_type}")
     else:
         viewer_type = args.viewer
 
     print(f"Visualization: {viewer_type}")
-    print("="*60)
+    print("=" * 60)
 
     # Initialize visualization
     if not args.no_display:
@@ -104,7 +114,7 @@ def main():
             viewer_type=viewer_type,
             width=config.camera.width,
             height=config.camera.height,
-            web_port=args.web_port
+            web_port=args.web_port,
         )
 
     # Initialize CARLA
@@ -125,7 +135,7 @@ def main():
         height=config.camera.height,
         fov=config.camera.fov,
         position=config.camera.position,
-        rotation=config.camera.rotation
+        rotation=config.camera.rotation,
     ):
         return 1
 
@@ -141,7 +151,7 @@ def main():
         image_width=config.camera.width,
         image_height=config.camera.height,
         kp=config.controller.kp,
-        kd=config.controller.kd
+        kd=config.controller.kd,
     )
 
     # Enable autopilot
@@ -150,12 +160,12 @@ def main():
         print("\n✓ Autopilot enabled")
 
     # Main loop
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("System Running")
-    if viewer_type == 'web':
+    if viewer_type == "web":
         print(f"View at: http://localhost:{args.web_port}")
     print("Press Ctrl+C to quit")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     frame_count = 0
     timeouts = 0
@@ -169,18 +179,24 @@ def main():
                 continue
 
             # Send to detector
-            image_msg = ImageMessage(image=image, timestamp=time.time(), frame_id=frame_count)
+            image_msg = ImageMessage(
+                image=image, timestamp=time.time(), frame_id=frame_count
+            )
             detection = detector.detect(image_msg)
 
             if detection is None:
                 timeouts += 1
-                control = ControlMessage(steering=0.0, throttle=0.0, brake=0.3, mode=ControlMode.LANE_KEEPING)
+                control = ControlMessage(
+                    steering=0.0, throttle=0.0, brake=0.3, mode=ControlMode.LANE_KEEPING
+                )
             else:
                 control = controller.process_detection(detection)
 
             # Apply control
             if not vehicle_mgr.is_autopilot_enabled():
-                vehicle_mgr.apply_control(control.steering, control.throttle, control.brake)
+                vehicle_mgr.apply_control(
+                    control.steering, control.throttle, control.brake
+                )
 
             # Visualize
             if not args.no_display:
@@ -193,29 +209,65 @@ def main():
                     # Draw lanes manually if debug_image not available
                     if detection is not None:
                         if detection.left_lane:
-                            cv2.line(vis_image,
-                                    (detection.left_lane.x1, detection.left_lane.y1),
-                                    (detection.left_lane.x2, detection.left_lane.y2),
-                                    (255, 0, 0), 5)
+                            cv2.line(
+                                vis_image,
+                                (detection.left_lane.x1, detection.left_lane.y1),
+                                (detection.left_lane.x2, detection.left_lane.y2),
+                                (255, 0, 0),
+                                5,
+                            )
                         if detection.right_lane:
-                            cv2.line(vis_image,
-                                    (detection.right_lane.x1, detection.right_lane.y1),
-                                    (detection.right_lane.x2, detection.right_lane.y2),
-                                    (0, 0, 255), 5)
+                            cv2.line(
+                                vis_image,
+                                (detection.right_lane.x1, detection.right_lane.y1),
+                                (detection.right_lane.x2, detection.right_lane.y2),
+                                (0, 0, 255),
+                                5,
+                            )
 
                 # Add text overlays
-                cv2.putText(vis_image, f"Frame: {frame_count}", (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(vis_image, f"Steering: {control.steering:.3f}", (10, 60),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                cv2.putText(vis_image, f"Timeouts: {timeouts}", (10, 90),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0) if timeouts > 0 else (0, 255, 0), 2)
+                cv2.putText(
+                    vis_image,
+                    f"Frame: {frame_count}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                )
+                cv2.putText(
+                    vis_image,
+                    f"Steering: {control.steering:.3f}",
+                    (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 0),
+                    2,
+                )
+                cv2.putText(
+                    vis_image,
+                    f"Timeouts: {timeouts}",
+                    (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (255, 0, 0) if timeouts > 0 else (0, 255, 0),
+                    2,
+                )
 
                 # Show detection status
-                status_text = "Detection: OK" if detection is not None else "Detection: TIMEOUT"
+                status_text = (
+                    "Detection: OK" if detection is not None else "Detection: TIMEOUT"
+                )
                 status_color = (0, 255, 0) if detection is not None else (255, 0, 0)
-                cv2.putText(vis_image, status_text, (10, 120),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
+                cv2.putText(
+                    vis_image,
+                    status_text,
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    status_color,
+                    2,
+                )
 
                 # Show image
                 if not viz.show(vis_image):
@@ -227,11 +279,17 @@ def main():
             # Print status every 30 frames
             if frame_count % 30 == 0:
                 fps = 30 / (time.time() - last_print)
-                lanes = "TIMEOUT" if detection is None else (
-                    f"{'L' if detection.left_lane else '-'}{'R' if detection.right_lane else '-'}"
+                lanes = (
+                    "TIMEOUT"
+                    if detection is None
+                    else (
+                        f"{'L' if detection.left_lane else '-'}{'R' if detection.right_lane else '-'}"
+                    )
                 )
-                print(f"Frame {frame_count:5d} | FPS: {fps:5.1f} | Lanes: {lanes} | "
-                      f"Steering: {control.steering:+.3f} | Timeouts: {timeouts}")
+                print(
+                    f"Frame {frame_count:5d} | FPS: {fps:5.1f} | Lanes: {lanes} | "
+                    f"Steering: {control.steering:+.3f} | Timeouts: {timeouts}"
+                )
                 last_print = time.time()
 
     except KeyboardInterrupt:

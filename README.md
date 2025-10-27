@@ -20,7 +20,7 @@ A modular, production-ready lane detection system for CARLA simulator with suppo
 ./CarlaUE4.sh
 
 # Run lane detection (in dev container or local environment)
-cd lane_detection
+cd detection
 python main_modular.py --method cv --host localhost --port 2000
 ```
 
@@ -28,7 +28,7 @@ python main_modular.py --method cv --host localhost --port 2000
 
 ```bash
 # Terminal 1: Start detection server
-cd lane_detection
+cd detection
 python detection_server.py --method cv --port 5555
 
 # Terminal 2: Start CARLA client with web viewer
@@ -54,7 +54,16 @@ python main_distributed_v2.py --detector-url tcp://localhost:5555 --viewer web -
 
 ```
 ads_ld/
-├── lane_detection/                 # Main package
+├── simulation/                    # CARLA simulator integration ⭐
+│   ├── connection.py              # CARLA connection
+│   ├── vehicle.py                 # Vehicle management
+│   └── sensors.py                 # Camera sensor
+│
+├── decision/                      # Control decisions ⭐
+│   ├── analyzer.py                # Lane analysis
+│   └── controller.py              # PD controller
+│
+├── detection/                     # Lane detection package
 │   ├── main_modular.py            # Single-process entry point ⭐
 │   ├── main_distributed_v2.py     # Distributed system with web viewer ⭐
 │   ├── detection_server.py        # Standalone detection server ⭐
@@ -66,16 +75,8 @@ ads_ld/
 │   │   ├── config.py              # Configuration management
 │   │   └── factory.py             # Factory pattern for detectors
 │   │
-│   ├── modules/                   # Three main modules
-│   │   ├── carla_module/          # CARLA simulator integration
-│   │   │   ├── connection.py      # CARLA connection
-│   │   │   ├── vehicle.py         # Vehicle management
-│   │   │   └── sensors.py         # Camera sensor
-│   │   ├── detection_module/      # Lane detection
-│   │   │   └── detector.py        # Detection wrapper
-│   │   └── decision_module/       # Control decisions
-│   │       ├── analyzer.py        # Lane analysis
-│   │       └── controller.py      # PD controller
+│   ├── detection_module/          # Lane detection wrapper
+│   │   └── detector.py            # Detection module
 │   │
 │   ├── method/                    # Detection implementations
 │   │   ├── computer_vision/       # OpenCV-based detection
@@ -142,17 +143,35 @@ ads_ld/
 
 ### Modular Design
 
-The system follows a clean **three-module architecture**:
+The system follows a clean **three-module architecture** with top-level separation:
 
 ```
+Project Root (ads_ld/)
+│
+├── simulation/             ← CARLA simulator integration
+│   • Connection management
+│   • Vehicle control
+│   • Camera sensors
+│
+├── decision/               ← Control decisions
+│   • Lane analysis
+│   • PD controller
+│   • Control logic
+│
+└── detection/              ← Lane detection & orchestration
+    • Detection methods (CV/DL)
+    • System orchestrator
+    • Integration layer
+
 ┌─────────────────────────────────────────────────────────────┐
-│                     Orchestrator                             │
-│                  (Coordinates modules)                        │
+│                Orchestrator (detection/)                     │
+│               (Coordinates all modules)                      │
 └─────────────────────────────────────────────────────────────┘
          │                    │                    │
          ▼                    ▼                    ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌──────────────────┐
-│  CARLA Module   │  │Detection Module │  │ Decision Module  │
+│   simulation/   │  │   detection/    │  │    decision/     │
+│  (Root level)   │  │detection_module/│  │  (Root level)    │
 │                 │  │                 │  │                  │
 │ • Connection    │  │ • CV Detector   │  │ • Lane Analyzer  │
 │ • Vehicle       │  │ • DL Detector   │  │ • PD Controller  │
@@ -185,7 +204,7 @@ For production deployments, the detection can run on a separate process/machine:
 
 ## 🔧 Configuration
 
-### Config File (`lane_detection/config.yaml`)
+### Config File (`detection/config.yaml`)
 
 ```yaml
 # CARLA Connection
@@ -237,14 +256,14 @@ visualization:
 ### 1. Single-Process with Computer Vision
 
 ```bash
-cd lane_detection
+cd detection
 python main_modular.py --method cv --host localhost --port 2000
 ```
 
 ### 2. Single-Process with Deep Learning
 
 ```bash
-cd lane_detection
+cd detection
 python main_modular.py --method dl --model path/to/model.pth
 ```
 
@@ -287,14 +306,14 @@ python main_modular.py --method cv --no-display
 ### Test Without CARLA (Standalone)
 
 ```bash
-cd lane_detection
+cd detection
 python tests/test_setup.py
 ```
 
 ### Test CARLA Connection
 
 ```bash
-cd lane_detection
+cd detection
 python tests/test_connection.py --host localhost --port 2000
 ```
 
@@ -443,7 +462,7 @@ Frame 00150 | FPS: 28.5 | Lanes: LR | Steering: +0.123 | Timeouts: 0
 4. **Connect to Remote CARLA:**
    ```bash
    # In VSCode terminal (inside container)
-   cd lane_detection
+   cd detection
    python main_modular.py --host <LINUX_IP> --port 2000
    ```
 
@@ -460,9 +479,9 @@ See [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) for detailed setup.
 | [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) | Dev container setup for M1 Mac |
 | [docs/MACOS_M1_SETUP.md](docs/MACOS_M1_SETUP.md) | M1 Mac specific instructions |
 | [docs/DL_QUICKSTART.md](docs/DL_QUICKSTART.md) | Deep learning model setup |
-| [lane_detection/DISTRIBUTED_ARCHITECTURE.md](lane_detection/DISTRIBUTED_ARCHITECTURE.md) | Distributed system guide |
-| [lane_detection/SYSTEM_OVERVIEW.md](lane_detection/SYSTEM_OVERVIEW.md) | System components overview |
-| [lane_detection/VISUALIZATION_GUIDE.md](lane_detection/VISUALIZATION_GUIDE.md) | Visualization options |
+| [detection/DISTRIBUTED_ARCHITECTURE.md](detection/DISTRIBUTED_ARCHITECTURE.md) | Distributed system guide |
+| [detection/SYSTEM_OVERVIEW.md](detection/SYSTEM_OVERVIEW.md) | System components overview |
+| [detection/VISUALIZATION_GUIDE.md](detection/VISUALIZATION_GUIDE.md) | Visualization options |
 | [CLEANUP_SUMMARY.md](CLEANUP_SUMMARY.md) | Recent codebase cleanup details |
 
 ## 🎓 For Students
@@ -484,7 +503,7 @@ When adding new features:
 1. Follow the modular architecture
 2. Maintain separation of concerns (CARLA / Detection / Decision)
 3. Use the factory pattern for new detectors
-4. Add tests in `lane_detection/tests/`
+4. Add tests in `detection/tests/`
 5. Update relevant documentation
 
 ## 🔗 Related Projects

@@ -10,13 +10,15 @@ from enum import Enum
 # Import Lane model for type hints
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.models import Lane, LaneMetrics
-from core.models import LaneDepartureStatus as CoreLaneDepartureStatus
+from detection.core.models import Lane, LaneMetrics
+from detection.core.models import LaneDepartureStatus as CoreLaneDepartureStatus
 
 
 class LaneDepartureStatus(Enum):
     """Enum for lane departure status."""
+
     CENTERED = "centered"
     LEFT_DRIFT = "left_drift"
     RIGHT_DRIFT = "right_drift"
@@ -28,12 +30,14 @@ class LaneDepartureStatus(Enum):
 class LaneAnalyzer:
     """Analyzes lane position and calculates metrics for LKAS."""
 
-    def __init__(self,
-                 image_width: int,
-                 image_height: int,
-                 drift_threshold: float = 0.15,
-                 departure_threshold: float = 0.35,
-                 lane_width_meters: float = 3.7):
+    def __init__(
+        self,
+        image_width: int,
+        image_height: int,
+        drift_threshold: float = 0.15,
+        departure_threshold: float = 0.35,
+        lane_width_meters: float = 3.7,
+    ):
         """
         Initialize lane analyzer.
 
@@ -53,10 +57,12 @@ class LaneAnalyzer:
         # Camera assumed to be centered on vehicle
         self.vehicle_center_x = image_width // 2
 
-    def calculate_lane_center(self,
-                              left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                              right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                              y_position: Optional[int] = None) -> Optional[float]:
+    def calculate_lane_center(
+        self,
+        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        y_position: Optional[int] = None,
+    ) -> Optional[float]:
         """
         Calculate the center of the lane at a given y position.
 
@@ -83,7 +89,9 @@ class LaneAnalyzer:
 
         return (left_x + right_x) / 2.0
 
-    def _interpolate_x(self, lane: Union[Lane, Tuple[int, int, int, int]], y: int) -> Optional[float]:
+    def _interpolate_x(
+        self, lane: Union[Lane, Tuple[int, int, int, int]], y: int
+    ) -> Optional[float]:
         """
         Interpolate x coordinate at given y position on a lane line.
 
@@ -114,9 +122,11 @@ class LaneAnalyzer:
         x = x1 + t * (x2 - x1)
         return float(x)
 
-    def calculate_lateral_offset(self,
-                                 left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                                 right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]]) -> Optional[float]:
+    def calculate_lateral_offset(
+        self,
+        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+    ) -> Optional[float]:
         """
         Calculate lateral offset from lane center in pixels.
         Positive value means vehicle is to the right of center.
@@ -136,9 +146,11 @@ class LaneAnalyzer:
         offset = self.vehicle_center_x - lane_center
         return offset
 
-    def calculate_lateral_offset_meters(self,
-                                       left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                                       right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]]) -> Optional[float]:
+    def calculate_lateral_offset_meters(
+        self,
+        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+    ) -> Optional[float]:
         """
         Calculate lateral offset from lane center in meters.
 
@@ -166,9 +178,11 @@ class LaneAnalyzer:
 
         return offset_meters
 
-    def calculate_lane_width(self,
-                            left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                            right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]]) -> Optional[float]:
+    def calculate_lane_width(
+        self,
+        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+    ) -> Optional[float]:
         """
         Calculate lane width in pixels.
 
@@ -192,9 +206,11 @@ class LaneAnalyzer:
 
         return abs(right_x - left_x)
 
-    def calculate_heading_angle(self,
-                                left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                                right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]]) -> Optional[float]:
+    def calculate_heading_angle(
+        self,
+        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+    ) -> Optional[float]:
         """
         Calculate vehicle heading angle relative to lane direction in degrees.
         Positive angle means vehicle is pointing right relative to lane.
@@ -230,9 +246,11 @@ class LaneAnalyzer:
 
         return angle_deg
 
-    def get_departure_status(self,
-                            left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                            right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]]) -> LaneDepartureStatus:
+    def get_departure_status(
+        self,
+        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+    ) -> LaneDepartureStatus:
         """
         Determine lane departure status.
 
@@ -273,9 +291,11 @@ class LaneAnalyzer:
         else:
             return LaneDepartureStatus.CENTERED
 
-    def get_metrics(self,
-                   left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                   right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]]) -> LaneMetrics:
+    def get_metrics(
+        self,
+        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+    ) -> LaneMetrics:
         """
         Get all lane analysis metrics.
 
@@ -288,7 +308,9 @@ class LaneAnalyzer:
         """
         # Calculate all metrics
         lateral_offset_pixels = self.calculate_lateral_offset(left_lane, right_lane)
-        lateral_offset_meters = self.calculate_lateral_offset_meters(left_lane, right_lane)
+        lateral_offset_meters = self.calculate_lateral_offset_meters(
+            left_lane, right_lane
+        )
         lane_width_pixels = self.calculate_lane_width(left_lane, right_lane)
         heading_angle_deg = self.calculate_heading_angle(left_lane, right_lane)
         departure_status = self.get_departure_status(left_lane, right_lane)
@@ -296,7 +318,11 @@ class LaneAnalyzer:
 
         # Calculate normalized offset
         lateral_offset_normalized = None
-        if lateral_offset_pixels is not None and lane_width_pixels is not None and lane_width_pixels > 0:
+        if (
+            lateral_offset_pixels is not None
+            and lane_width_pixels is not None
+            and lane_width_pixels > 0
+        ):
             lateral_offset_normalized = lateral_offset_pixels / lane_width_pixels
 
         # Convert local enum to core enum
@@ -314,10 +340,12 @@ class LaneAnalyzer:
             departure_status=core_status,
             has_left_lane=(left_lane is not None),
             has_right_lane=(right_lane is not None),
-            has_both_lanes=(left_lane is not None and right_lane is not None)
+            has_both_lanes=(left_lane is not None and right_lane is not None),
         )
 
-    def _convert_departure_status(self, status: LaneDepartureStatus) -> CoreLaneDepartureStatus:
+    def _convert_departure_status(
+        self, status: LaneDepartureStatus
+    ) -> CoreLaneDepartureStatus:
         """Convert local LaneDepartureStatus to core LaneDepartureStatus."""
         mapping = {
             LaneDepartureStatus.CENTERED: CoreLaneDepartureStatus.CENTERED,
@@ -325,15 +353,17 @@ class LaneAnalyzer:
             LaneDepartureStatus.RIGHT_DRIFT: CoreLaneDepartureStatus.RIGHT_DRIFT,
             LaneDepartureStatus.LEFT_DEPARTURE: CoreLaneDepartureStatus.LEFT_DEPARTURE,
             LaneDepartureStatus.RIGHT_DEPARTURE: CoreLaneDepartureStatus.RIGHT_DEPARTURE,
-            LaneDepartureStatus.NO_LANES: CoreLaneDepartureStatus.UNKNOWN
+            LaneDepartureStatus.NO_LANES: CoreLaneDepartureStatus.UNKNOWN,
         }
         return mapping.get(status, CoreLaneDepartureStatus.UNKNOWN)
 
-    def get_steering_correction(self,
-                                left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                                right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-                                kp: float = 0.5,
-                                kd: float = 0.1) -> Optional[float]:
+    def get_steering_correction(
+        self,
+        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        kp: float = 0.5,
+        kd: float = 0.1,
+    ) -> Optional[float]:
         """
         Calculate suggested steering correction using PD controller.
 

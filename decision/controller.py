@@ -7,12 +7,18 @@ Combines lane analysis with PD control logic.
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from typing import Optional
-from integration.messages import DetectionMessage, ControlMessage, LaneMessage, ControlMode
+from detection.integration.messages import (
+    DetectionMessage,
+    ControlMessage,
+    LaneMessage,
+    ControlMode,
+)
 from .analyzer import LaneAnalyzer
-from processing.pd_controller import PDController
+from detection.processing.pd_controller import PDController
 
 
 class DecisionController:
@@ -26,11 +32,9 @@ class DecisionController:
     - Generate control messages for CARLA module
     """
 
-    def __init__(self,
-                 image_width: int,
-                 image_height: int,
-                 kp: float = 0.5,
-                 kd: float = 0.1):
+    def __init__(
+        self, image_width: int, image_height: int, kp: float = 0.5, kd: float = 0.1
+    ):
         """
         Initialize decision controller.
 
@@ -41,10 +45,7 @@ class DecisionController:
             kd: Derivative gain for steering control
         """
         # Lane analysis
-        self.analyzer = LaneAnalyzer(
-            image_width=image_width,
-            image_height=image_height
-        )
+        self.analyzer = LaneAnalyzer(image_width=image_width, image_height=image_height)
 
         # Steering control
         self.pd_controller = PDController(kp=kp, kd=kd)
@@ -71,12 +72,20 @@ class DecisionController:
         right_lane = None
 
         if detection.left_lane:
-            left_lane = (detection.left_lane.x1, detection.left_lane.y1,
-                        detection.left_lane.x2, detection.left_lane.y2)
+            left_lane = (
+                detection.left_lane.x1,
+                detection.left_lane.y1,
+                detection.left_lane.x2,
+                detection.left_lane.y2,
+            )
 
         if detection.right_lane:
-            right_lane = (detection.right_lane.x1, detection.right_lane.y1,
-                         detection.right_lane.x2, detection.right_lane.y2)
+            right_lane = (
+                detection.right_lane.x1,
+                detection.right_lane.y1,
+                detection.right_lane.x2,
+                detection.right_lane.y2,
+            )
 
         # Analyze lanes to get metrics
         metrics = self.analyzer.get_metrics(left_lane, right_lane)
@@ -101,7 +110,7 @@ class DecisionController:
             brake=brake,
             mode=self.mode,
             lateral_offset=metrics.lateral_offset_normalized,
-            heading_angle=metrics.heading_angle_deg
+            heading_angle=metrics.heading_angle_deg,
         )
 
         # Ensure values are clamped

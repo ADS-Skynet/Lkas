@@ -19,7 +19,7 @@ import json
 from typing import Optional, Tuple
 from dataclasses import asdict
 
-from integration.messages import ImageMessage, DetectionMessage, LaneMessage
+from .messages import ImageMessage, DetectionMessage, LaneMessage
 
 
 class ImageSerializer:
