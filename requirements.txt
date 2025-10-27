@@ -1,28 +1,73 @@
-# Core dependencies
-numpy>=1.24.0
-opencv-python>=4.8.0
-opencv-contrib-python>=4.8.0
+# Lane Detection for CARLA - Python Dependencies
+# Python 3.10+ required for CARLA 0.9.16
 
-# Deep Learning
-# Python 3.10 compatible versions (CARLA 0.9.16 requires Python 3.10+)
-torch>=2.0.0
-torchvision>=0.15.0
+# ============================================================================
+# Core Dependencies (Required)
+# ============================================================================
 
-# CARLA Python API
-# CARLA 0.9.16 supports Python 3.10, 3.11, 3.12
+# Numerical Computing
+numpy>=1.24.0,<3.0.0
+
+# Computer Vision
+opencv-python>=4.8.0,<5.0.0
+opencv-contrib-python>=4.8.0,<5.0.0
+
+# Deep Learning Framework
+torch>=2.0.0,<3.0.0
+torchvision>=0.15.0,<1.0.0
+
+# CARLA Simulator Python API
+# Note: Must match your CARLA server version
 carla==0.9.16
 
-# Data processing
-pillow>=10.0.0
-scipy>=1.11.0
+# Image Processing
+pillow>=10.0.0,<13.0.0
 
-# Visualization
-matplotlib>=3.7.0
+# Scientific Computing
+scipy>=1.11.0,<2.0.0
 
-# Utilities
-pyyaml>=6.0
-tqdm>=4.65.0
+# Configuration Management
+pyyaml>=6.0,<7.0
 
-# Optional: for model training
-# tensorboard>=2.13.0
-# scikit-learn>=1.3.0
+# Progress Bars
+tqdm>=4.65.0,<5.0.0
+
+# ============================================================================
+# Distributed System Dependencies (Required for distributed mode)
+# ============================================================================
+
+# ZMQ for inter-process communication
+# Used by detection_server.py and main_distributed_v2.py
+pyzmq>=25.1.0,<28.0.0
+
+# ============================================================================
+# Visualization Dependencies
+# ============================================================================
+
+# Matplotlib (for plotting metrics and debugging)
+matplotlib>=3.7.0,<4.0.0
+
+# Flask (for web viewer - no X11 needed!)
+# Used by ui/web_viewer.py in main_distributed_v2.py
+flask>=2.3.0,<4.0.0
+werkzeug>=2.3.0,<4.0.0  # Flask dependency
+
+# Pygame (optional, for pygame viewer)
+# Used by ui/pygame_viewer.py
+pygame>=2.5.0,<3.0.0
+
+# ============================================================================
+# Optional Dependencies (for model training and development)
+# ============================================================================
+
+# Uncomment if you plan to train deep learning models:
+# tensorboard>=2.13.0,<3.0.0      # Training visualization
+# scikit-learn>=1.3.0,<2.0.0      # Data preprocessing and metrics
+# wandb>=0.15.0,<1.0.0            # Experiment tracking
+# albumentations>=1.3.0,<2.0.0    # Data augmentation
+
+# Uncomment for development tools:
+# pytest>=7.4.0,<8.0.0            # Testing framework
+# black>=23.0.0,<24.0.0           # Code formatting
+# flake8>=6.0.0,<7.0.0            # Linting
+# mypy>=1.4.0,<2.0.0              # Type checking

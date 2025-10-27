@@ -1,477 +1,540 @@
-# Lane Detection for LKAS - Complete Setup Guide
+# Lane Detection for Autonomous Driving - CARLA Implementation
 
-## ⚠️ IMPORTANT: Understanding the Architecture
+A modular, production-ready lane detection system for CARLA simulator with support for both Computer Vision and Deep Learning methods.
 
-### What You Actually Have
+## 🌟 Features
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Your M1 Mac (macOS ARM64)                                  │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  VSCode + Dev Container                                │ │
-│  │                                                         │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │  Docker Container (linux/amd64 via Rosetta)      │  │ │
-│  │  │                                                   │  │ │
-│  │  │  🐍 Python 3.10 (x86_64)                         │  │ │
-│  │  │  📦 CARLA Python Client Module (x86_64 .whl)     │  │ │
-│  │  │  🚗 Your Lane Detection Code                     │  │ │
-│  │  │  📊 OpenCV, PyTorch, NumPy, etc.                 │  │ │
-│  │  │                                                   │  │ │
-│  │  │  Connects to remote CARLA ───────────────────┐   │  │ │
-│  │  └──────────────────────────────────────────────│───┘  │ │
-│  └───────────────────────────────────────────────┼───────┘ │
-└────────────────────────────────────────────────┼───────────┘
-                                                  │
-                                    Network (TCP/IP)
-                                    port 2000
-                                                  │
-                                                  ↓
-                  ┌──────────────────────────────────────────┐
-                  │  Remote Linux Machine (x86_64)           │
-                  │                                           │
-                  │  🖥️  CARLA Simulator Server              │
-                  │  🎮 Unreal Engine 4                      │
-                  │  📡 Listening on port 2000               │
-                  │                                           │
-                  └──────────────────────────────────────────┘
-```
+- **Modular Architecture**: Clean separation between CARLA, Detection, and Decision modules
+- **Dual Detection Methods**: Computer Vision (OpenCV) and Deep Learning (PyTorch CNN)
+- **Distributed System**: Run detection on remote GPU servers
+- **Multiple Visualization Options**: OpenCV, Pygame, and Web viewer (no X11 needed!)
+- **Production Ready**: Process isolation, ZMQ communication, fault tolerance
+- **Dev Container**: Seamless development on M1 Mac with Docker
 
-### The Key Point
+## 🚀 Quick Start
 
-**BOTH the CARLA Python client AND CARLA server need x86_64:**
-
-❌ **What DOESN'T work on M1:**
-- Native CARLA Python client (no ARM64 .whl files)
-- Native CARLA server (no macOS build at all)
-
-✅ **What DOES work:**
-- **CARLA Python client** runs in **Docker on your M1** (x86_64 via Rosetta 2)
-- **CARLA server** runs on **remote Linux machine** (native x86_64)
-- They **connect over network** (localhost or LAN)
-
----
-
-## 🚀 Quick Start (3 Options)
-
-### Option 1: Dev Container (RECOMMENDED) ⭐
-
-**Best for:** Daily development on M1 Mac
-
-1. Open project in VSCode
-2. Install "Dev Containers" extension
-3. `Cmd+Shift+P` → "Reopen in Container"
-4. Wait for build (~10-15 min first time)
-5. Connect to remote CARLA server
-
-📖 **Full guide:** [DEVCONTAINER_SETUP.md](DEVCONTAINER_SETUP.md)
-
-**Pros:**
-- ✅ Seamless VSCode integration
-- ✅ Debugger works
-- ✅ All extensions work
-- ✅ Easy to use
-
-**Cons:**
-- 🟡 Slower than native (emulation overhead)
-- 🟡 First build takes time
-
----
-
-### Option 2: Manual Docker
-
-**Best for:** If you don't use VSCode
+### Option 1: Single-Process Mode (Recommended for Testing)
 
 ```bash
-# Build container
-docker build -t lane-detection-carla .devcontainer/
-
-# Run with network access
-docker run -it --rm \
-  --platform linux/amd64 \
-  -v $(pwd):/workspace \
-  -w /workspace \
-  lane-detection-carla \
-  bash
-
-# Inside container:
-cd lane_detection
-python main.py --host <REMOTE_IP> --port 2000
-```
-
----
-
-### Option 3: Remote Development (SSH)
-
-**Best for:** Maximum performance
-
-1. Install "Remote - SSH" extension in VSCode
-2. SSH to Linux machine
-3. Develop directly on Linux (where CARLA server runs)
-4. No emulation needed!
-
----
-
-## 📋 Setup Steps
-
-### Step 1: Prepare Your M1 Mac
-
-#### Install Docker Desktop
-```bash
-# Download from https://www.docker.com/products/docker-desktop/
-```
-
-#### Enable Rosetta 2 in Docker
-1. Docker Desktop → Settings
-2. Features in development → Beta Features
-3. ✅ "Use Rosetta for x86/amd64 emulation on Apple Silicon"
-4. Apply & Restart
-
-#### Install VSCode Extensions
-- Dev Containers (ms-vscode-remote.remote-containers)
-- Python (ms-python.python)
-
-### Step 2: Set Up Linux Machine (CARLA Server)
-
-On your **Linux machine** (not Mac!):
-
-```bash
-# Download CARLA (on Linux machine)
-cd ~
-wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_0.9.15.tar.gz
-tar -xzf CARLA_0.9.15.tar.gz
-cd CARLA_0.9.15
-
-# Start CARLA server
+# Start CARLA server (on Linux machine or same machine)
 ./CarlaUE4.sh
 
-# Or in background with screen:
-screen -S carla
-./CarlaUE4.sh
-# Press Ctrl+A then D to detach
-```
-
-#### Allow Network Access
-```bash
-# Check firewall
-sudo ufw status
-
-# Allow CARLA port
-sudo ufw allow 2000/tcp
-
-# Get IP address
-hostname -I
-# Note this IP (e.g., 192.168.1.100)
-```
-
-### Step 3: Open Project in Dev Container
-
-On your **M1 Mac**:
-
-```bash
-cd /Users/donghyun/All/seame/ads_ld
-code .
-```
-
-In VSCode:
-1. `Cmd+Shift+P`
-2. "Dev Containers: Reopen in Container"
-3. Wait for build
-
-### Step 4: Test Connection
-
-In VSCode terminal (inside container):
-
-```bash
-# Test CARLA module
-python -c "import carla; print('✅ Works!')"
-
-# Test connection to remote server
+# Run lane detection (in dev container or local environment)
 cd lane_detection
-python test_carla_connection.py --host 192.168.1.100 --port 2000
+python main_modular.py --method cv --host localhost --port 2000
 ```
 
-Replace `192.168.1.100` with your Linux machine's IP.
-
-### Step 5: Run Lane Detection
+### Option 2: Distributed Mode (Recommended for Production)
 
 ```bash
+# Terminal 1: Start detection server
 cd lane_detection
-python main.py --method cv --host 192.168.1.100 --port 2000
+python detection_server.py --method cv --port 5555
+
+# Terminal 2: Start CARLA client with web viewer
+python main_distributed_v2.py --detector-url tcp://localhost:5555 --viewer web --web-port 8080
+
+# Open browser: http://localhost:8080
 ```
 
----
+## 📋 System Requirements
+
+### For M1 Mac Development
+- **Docker Desktop** with Rosetta 2 enabled
+- **VSCode** with Dev Containers extension
+- **Remote Linux machine** running CARLA server (x86_64)
+
+### For Native Linux Development
+- **Ubuntu 18.04+** (x86_64)
+- **CARLA 0.9.15** simulator
+- **Python 3.10+**
+- **GPU** (optional, for deep learning)
 
 ## 📁 Project Structure
 
 ```
 ads_ld/
-├── .devcontainer/              # Dev Container configuration ⭐
-│   ├── devcontainer.json      # VSCode config
-│   └── Dockerfile             # Container definition
+├── lane_detection/                 # Main package
+│   ├── main_modular.py            # Single-process entry point ⭐
+│   ├── main_distributed_v2.py     # Distributed system with web viewer ⭐
+│   ├── detection_server.py        # Standalone detection server ⭐
+│   ├── config.yaml                # Configuration file
+│   │
+│   ├── core/                      # Core abstractions
+│   │   ├── interfaces.py          # Abstract base classes
+│   │   ├── models.py              # Data models (Lane, Metrics)
+│   │   ├── config.py              # Configuration management
+│   │   └── factory.py             # Factory pattern for detectors
+│   │
+│   ├── modules/                   # Three main modules
+│   │   ├── carla_module/          # CARLA simulator integration
+│   │   │   ├── connection.py      # CARLA connection
+│   │   │   ├── vehicle.py         # Vehicle management
+│   │   │   └── sensors.py         # Camera sensor
+│   │   ├── detection_module/      # Lane detection
+│   │   │   └── detector.py        # Detection wrapper
+│   │   └── decision_module/       # Control decisions
+│   │       ├── analyzer.py        # Lane analysis
+│   │       └── controller.py      # PD controller
+│   │
+│   ├── method/                    # Detection implementations
+│   │   ├── computer_vision/       # OpenCV-based detection
+│   │   │   └── cv_lane_detector.py
+│   │   └── deep_learning/         # CNN-based detection
+│   │       ├── lane_net.py        # Network architectures
+│   │       └── lane_net_base.py   # Training/inference base
+│   │
+│   ├── integration/               # System integration
+│   │   ├── orchestrator.py        # Single-process orchestrator
+│   │   ├── distributed_orchestrator.py  # Multi-process orchestrator
+│   │   ├── communication.py       # ZMQ client/server
+│   │   ├── messages.py            # Message protocols
+│   │   └── visualization.py       # Visualization manager
+│   │
+│   ├── ui/                        # User interface components
+│   │   ├── web_viewer.py          # Web-based viewer (no X11!) ⭐
+│   │   ├── pygame_viewer.py       # Pygame viewer
+│   │   ├── keyboard_handler.py    # Keyboard controls
+│   │   └── video_recorder.py      # Video recording
+│   │
+│   ├── processing/                # Frame processing
+│   │   ├── frame_processor.py     # Frame processing pipeline
+│   │   ├── pd_controller.py       # PD controller
+│   │   └── metrics_logger.py      # Performance metrics
+│   │
+│   ├── utils/                     # Utilities
+│   │   ├── lane_analyzer.py       # Lane analysis
+│   │   ├── visualizer.py          # Visualization helpers
+│   │   └── spectator_overlay.py   # CARLA spectator overlay
+│   │
+│   ├── tests/                     # Test suite
+│   │   ├── test_connection.py     # CARLA connection tests
+│   │   └── test_setup.py          # Setup verification
+│   │
+│   └── scripts/                   # Utility scripts
+│       └── start_distributed_system.sh
 │
-├── lane_detection/            # Main code directory
-│   ├── main.py               # Entry point
-│   ├── carla_interface.py    # CARLA connection
-│   ├── config.yaml           # Configuration
-│   ├── test_carla_connection.py  # Connection tester
-│   ├── test_setup.py         # Test without CARLA
-│   │
-│   ├── traditional/          # OpenCV lane detection
-│   │   └── cv_lane_detector.py
-│   │
-│   ├── deep_learning/        # CNN lane detection
-│   │   └── lane_net.py
-│   │
-│   └── utils/                # Utilities
-│       ├── lane_analyzer.py
-│       └── visualizer.py
+├── docs/                          # Documentation
+│   ├── START_HERE.md              # 👈 Start here!
+│   ├── QUICK_START.md             # Quick start guide
+│   ├── ARCHITECTURE_DECISION.md   # Architecture rationale
+│   ├── MODULAR_ARCHITECTURE.md    # Architecture explanation
+│   ├── DEVCONTAINER_SETUP.md      # Dev container setup
+│   ├── MACOS_M1_SETUP.md          # M1 Mac specific setup
+│   └── DL_QUICKSTART.md           # Deep learning setup
 │
-├── DEVCONTAINER_SETUP.md     # 📘 Dev Container guide (READ THIS!)
-├── README_CORRECTED.md       # This file
-├── QUICK_START.md            # Quick start guide
-├── requirements.txt          # Python dependencies
-└── docker-compose.yml        # Docker Compose config
+├── archive/                       # Deprecated files (for reference)
+│   ├── deprecated_main_files/     # Old entry points
+│   ├── old_temp_files/            # Old demo files
+│   └── deprecated_docs/           # Historical documentation
+│
+├── .devcontainer/                 # Dev container configuration
+│   ├── devcontainer.json          # VSCode configuration
+│   └── Dockerfile                 # Container definition
+│
+├── requirements.txt               # Python dependencies
+├── docker-compose.yml             # Docker compose configuration
+├── CLEANUP_SUMMARY.md             # Recent cleanup details
+└── README.md                      # This file
 ```
 
----
+## 🎯 Architecture
+
+### Modular Design
+
+The system follows a clean **three-module architecture**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Orchestrator                             │
+│                  (Coordinates modules)                        │
+└─────────────────────────────────────────────────────────────┘
+         │                    │                    │
+         ▼                    ▼                    ▼
+┌─────────────────┐  ┌─────────────────┐  ┌──────────────────┐
+│  CARLA Module   │  │Detection Module │  │ Decision Module  │
+│                 │  │                 │  │                  │
+│ • Connection    │  │ • CV Detector   │  │ • Lane Analyzer  │
+│ • Vehicle       │  │ • DL Detector   │  │ • PD Controller  │
+│ • Camera        │  │ • Factory       │  │ • Control Logic  │
+└─────────────────┘  └─────────────────┘  └──────────────────┘
+```
+
+### Distributed Architecture (Production)
+
+For production deployments, the detection can run on a separate process/machine:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  CARLA Client Process                                        │
+│  • Vehicle control                                           │
+│  • Decision making                                           │
+│  • Visualization                                             │
+└─────────────────────────────────────────────────────────────┘
+                         │
+                         │ ZMQ (TCP)
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Detection Server Process (Can be remote GPU machine!)      │
+│  • Lane detection                                            │
+│  • Computer Vision or Deep Learning                          │
+│  • Optimized for GPU inference                               │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## 🔧 Configuration
 
-### Option A: Command Line (Quick)
-
-```bash
-python main.py --host 192.168.1.100 --port 2000 --method cv
-```
-
-### Option B: Config File (Persistent)
-
-Edit `lane_detection/config.yaml`:
+### Config File (`lane_detection/config.yaml`)
 
 ```yaml
+# CARLA Connection
 carla:
-  host: "192.168.1.100"  # Your Linux machine IP
-  port: 2000
+  host: "localhost"        # CARLA server host
+  port: 2000               # CARLA server port
+  vehicle_type: "vehicle.tesla.model3"
 
+# Camera Settings
 camera:
   width: 800
   height: 600
+  fov: 90
+  position: [2.5, 0.0, 1.0]     # [x, y, z] relative to vehicle
+  rotation: [-15.0, 0.0, 0.0]   # [pitch, yaw, roll]
 
-system:
-  detection_method: "cv"  # or "dl"
+# Lane Detection
+detection:
+  method: "cv"             # "cv" or "dl"
+
+  cv:
+    roi_top_ratio: 0.4
+    canny_low: 50
+    canny_high: 150
+
+  dl:
+    model_path: null       # Path to trained model
+    input_size: [256, 256]
+
+# Controller
+controller:
+  kp: 0.5                  # Proportional gain
+  kd: 0.1                  # Derivative gain
+  max_steering: 0.8        # Maximum steering angle
+
+# Lane Analysis
+analyzer:
+  drift_threshold: 50      # Pixels
+  departure_threshold: 150 # Pixels
+
+# Visualization
+visualization:
+  show_spectator_overlay: true
+  follow_with_spectator: true
 ```
 
-Then just run:
+## 🎮 Usage Examples
+
+### 1. Single-Process with Computer Vision
+
 ```bash
-python main.py
+cd lane_detection
+python main_modular.py --method cv --host localhost --port 2000
 ```
 
-### Option C: Environment Variables
+### 2. Single-Process with Deep Learning
 
 ```bash
-export CARLA_HOST=192.168.1.100
-export CARLA_PORT=2000
-python main.py --host $CARLA_HOST --port $CARLA_PORT
+cd lane_detection
+python main_modular.py --method dl --model path/to/model.pth
 ```
 
----
+### 3. Distributed with Web Viewer (Best for Docker/Remote)
+
+```bash
+# Terminal 1: Detection server
+python detection_server.py --method cv --port 5555
+
+# Terminal 2: CARLA client with web viewer
+python main_distributed_v2.py \
+  --detector-url tcp://localhost:5555 \
+  --viewer web \
+  --web-port 8080
+
+# Open browser: http://localhost:8080
+```
+
+### 4. Distributed with Remote Detection Server
+
+```bash
+# On GPU machine: Start detection server
+python detection_server.py --method dl --port 5555
+
+# On local machine: Run CARLA client
+python main_distributed_v2.py \
+  --detector-url tcp://192.168.1.100:5555 \
+  --host localhost \
+  --port 2000
+```
+
+### 5. No Display Mode (Headless)
+
+```bash
+python main_modular.py --method cv --no-display
+```
 
 ## 🧪 Testing
 
-### Test 1: Without CARLA (Always works)
+### Test Without CARLA (Standalone)
 
 ```bash
 cd lane_detection
-python test_setup.py
+python tests/test_setup.py
 ```
 
-This tests CV detector, analyzer, and visualizer using synthetic images.
-
-### Test 2: CARLA Module Import
+### Test CARLA Connection
 
 ```bash
-python -c "import carla; print('✅ CARLA client works!')"
+cd lane_detection
+python tests/test_connection.py --host localhost --port 2000
 ```
 
-### Test 3: Connection to Remote CARLA
+### Test Detection Server
 
 ```bash
-python test_carla_connection.py --host <LINUX_IP> --port 2000
+# Terminal 1: Start server
+python detection_server.py --port 5555
+
+# Terminal 2: Test client
+python -c "
+from integration.communication import DetectionClient
+from integration.messages import ImageMessage
+import numpy as np
+import time
+
+client = DetectionClient('tcp://localhost:5555', timeout_ms=1000)
+image = np.zeros((600, 800, 3), dtype=np.uint8)
+msg = ImageMessage(image=image, timestamp=time.time(), frame_id=0)
+result = client.detect(msg)
+print(f'Detection result: {result}')
+client.close()
+"
 ```
-
-### Test 4: Full Lane Detection
-
-```bash
-python main.py --method cv --host <LINUX_IP> --port 2000
-```
-
----
 
 ## 🐛 Troubleshooting
 
-### "Cannot import carla"
+### 1. "Cannot import carla"
 
 **Inside Dev Container:**
 ```bash
-# Check PYTHONPATH
+# Check Python path
 echo $PYTHONPATH
 
-# Should include /opt/carla/...
+# Should include: /opt/carla/PythonAPI/carla
 
-# Try manual import
-python -c "import sys; sys.path.append('/opt/carla/PythonAPI/carla'); import carla"
+# Rebuild container if needed
+# VSCode: Cmd+Shift+P → "Dev Containers: Rebuild Container"
 ```
 
-**Fix:** Rebuild container
-```
-Cmd+Shift+P → "Dev Containers: Rebuild Container"
-```
+### 2. "Connection refused" to CARLA
 
-### "Connection refused" to CARLA
-
-**Check from Mac (outside container):**
+**Check CARLA is running:**
 ```bash
-# Can you reach the Linux machine?
-ping 192.168.1.100
-
-# Is port 2000 open?
-nc -zv 192.168.1.100 2000
-```
-
-**Check on Linux machine:**
-```bash
-# Is CARLA running?
+# On CARLA machine
 ps aux | grep Carla
-
-# Is it listening on port 2000?
 netstat -tuln | grep 2000
-
-# Check firewall
-sudo ufw status
 ```
 
-### Slow Performance
-
-This is expected - x86_64 emulation on ARM is slower.
-
-**Optimizations:**
+**Check network connectivity:**
 ```bash
-# Reduce resolution
-python main.py --width 640 --height 480
+# From your machine
+ping <CARLA_HOST>
+nc -zv <CARLA_HOST> 2000
+```
 
-# On Linux CARLA server, use low quality
+### 3. "Detection timeout" in Distributed Mode
+
+**Check detection server:**
+```bash
+# Is server running?
+ps aux | grep detection_server
+
+# Check logs
+python detection_server.py --method cv --port 5555
+```
+
+**Check ZMQ connection:**
+```bash
+# Test with netcat
+nc -zv localhost 5555
+```
+
+### 4. Web Viewer Not Loading
+
+**Check Flask server:**
+```bash
+# Is port available?
+lsof -i :8080
+
+# Try different port
+python main_distributed_v2.py --web-port 8081
+```
+
+### 5. Slow Performance on M1 Mac
+
+This is expected due to x86_64 emulation. Optimizations:
+
+```bash
+# Reduce camera resolution
+# Edit config.yaml:
+camera:
+  width: 640
+  height: 480
+
+# Use low quality on CARLA server
 ./CarlaUE4.sh -quality-level=Low
 
-# Allocate more resources to Docker
-# Docker Desktop → Settings → Resources
+# Use web viewer (lighter than OpenCV window)
+python main_distributed_v2.py --viewer web
 ```
 
----
+## 🔍 Keyboard Controls
 
-## 📊 Performance Comparison
+When running with visualization:
 
-| Setup | Client | Server | Speed | Complexity |
-|-------|--------|--------|-------|------------|
-| **Dev Container + Remote** | M1 Docker | Linux | 🟡🟡🟡 | 🟢 Easy |
-| Manual Docker + Remote | M1 Docker | Linux | 🟡🟡🟡 | 🟡 Medium |
-| Remote SSH | Linux | Linux | 🟢🟢🟢 | 🟡 Medium |
-| Native (Windows/Linux) | Native | Same | 🟢🟢🟢🟢 | 🟢 Easy |
+- **Q** - Quit
+- **S** - Toggle autopilot
+- **O** - Toggle spectator overlay
+- **F** - Toggle spectator follow mode
+- **R** - Respawn vehicle
+- **T** - Teleport to next spawn point
 
----
+## 📊 Performance Metrics
 
-## 🎯 Daily Workflow
+The system logs real-time performance metrics:
 
-### Morning:
-
-**On Linux machine:**
-```bash
-screen -r carla  # Reattach to CARLA if needed
-# Or start fresh:
-./CarlaUE4.sh
+```
+Frame 00150 | FPS: 28.5 | Lanes: LR | Steering: +0.123 | Timeouts: 0
 ```
 
-**On M1 Mac:**
-```bash
-cd /Users/donghyun/All/seame/ads_ld
-code .
-# Click "Reopen in Container" when prompted
-```
+- **FPS**: Frames per second
+- **Lanes**: Detected lanes (L=left, R=right, -=not detected)
+- **Steering**: Control output (-1.0 to +1.0)
+- **Timeouts**: Detection timeouts (distributed mode only)
 
-### Working:
+## 🚀 Development Setup (M1 Mac)
 
-```bash
-# Edit code in VSCode (automatically synced to container)
-# Run in integrated terminal:
-cd lane_detection
-python main.py --host <LINUX_IP> --port 2000
-```
+### Using Dev Container (Recommended)
 
-### Evening:
+1. **Install Prerequisites:**
+   - Docker Desktop for Mac
+   - VSCode with Dev Containers extension
 
-- Close VSCode (container stops automatically)
-- Linux CARLA can keep running (in screen)
+2. **Enable Rosetta 2 in Docker:**
+   - Docker Desktop → Settings → Features in Development
+   - ✅ "Use Rosetta for x86/amd64 emulation on Apple Silicon"
 
----
+3. **Open in Container:**
+   ```bash
+   cd /path/to/ads_ld
+   code .
+   # VSCode: Cmd+Shift+P → "Reopen in Container"
+   ```
 
-## 🚗 Moving to PiRacer
+4. **Connect to Remote CARLA:**
+   ```bash
+   # In VSCode terminal (inside container)
+   cd lane_detection
+   python main_modular.py --host <LINUX_IP> --port 2000
+   ```
 
-Good news! For PiRacer:
-- ✅ No CARLA needed
-- ✅ Uses real camera
-- ✅ Can run directly on Raspberry Pi (ARM64!)
-- ✅ Just replace `CARLAInterface` with `PiRacerCamera`
-
----
+See [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) for detailed setup.
 
 ## 📚 Documentation
 
-| File | Content |
-|------|---------|
-| **[DEVCONTAINER_SETUP.md](DEVCONTAINER_SETUP.md)** | Complete Dev Container guide |
-| **[QUICK_START.md](QUICK_START.md)** | General quick start |
-| **[lane_detection/README.md](lane_detection/README.md)** | Technical documentation |
-| **[requirements.txt](requirements.txt)** | Python dependencies |
+| Document | Description |
+|----------|-------------|
+| [docs/START_HERE.md](docs/START_HERE.md) | 👈 **New to the project? Start here!** |
+| [docs/QUICK_START.md](docs/QUICK_START.md) | Quick start guide |
+| [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md) | Why this architecture? |
+| [docs/MODULAR_ARCHITECTURE.md](docs/MODULAR_ARCHITECTURE.md) | Detailed architecture explanation |
+| [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) | Dev container setup for M1 Mac |
+| [docs/MACOS_M1_SETUP.md](docs/MACOS_M1_SETUP.md) | M1 Mac specific instructions |
+| [docs/DL_QUICKSTART.md](docs/DL_QUICKSTART.md) | Deep learning model setup |
+| [lane_detection/DISTRIBUTED_ARCHITECTURE.md](lane_detection/DISTRIBUTED_ARCHITECTURE.md) | Distributed system guide |
+| [lane_detection/SYSTEM_OVERVIEW.md](lane_detection/SYSTEM_OVERVIEW.md) | System components overview |
+| [lane_detection/VISUALIZATION_GUIDE.md](lane_detection/VISUALIZATION_GUIDE.md) | Visualization options |
+| [CLEANUP_SUMMARY.md](CLEANUP_SUMMARY.md) | Recent codebase cleanup details |
 
----
+## 🎓 For Students
 
-## ✅ Checklist
+This project demonstrates:
 
-**Before you start:**
-- [ ] Docker Desktop installed on M1 Mac
-- [ ] Rosetta 2 enabled in Docker
-- [ ] Dev Containers extension in VSCode
-- [ ] CARLA running on Linux machine
-- [ ] Linux machine IP address known
-- [ ] Port 2000 accessible
+- ✅ **Clean Architecture**: Modular design with single responsibility
+- ✅ **Design Patterns**: Factory, Strategy, Observer
+- ✅ **Process Communication**: ZMQ for inter-process messaging
+- ✅ **Configuration Management**: YAML-based configuration
+- ✅ **Multiple Algorithms**: CV and DL approaches
+- ✅ **Production Ready**: Error handling, logging, metrics
+- ✅ **Docker & DevOps**: Containerized development environment
 
-**First time setup:**
-- [ ] Open in Dev Container (builds automatically)
-- [ ] Test: `python -c "import carla"`
-- [ ] Test: `python test_carla_connection.py --host <IP>`
-- [ ] Run: `python main.py --host <IP>`
+## 🤝 Contributing
 
----
+When adding new features:
+
+1. Follow the modular architecture
+2. Maintain separation of concerns (CARLA / Detection / Decision)
+3. Use the factory pattern for new detectors
+4. Add tests in `lane_detection/tests/`
+5. Update relevant documentation
+
+## 🔗 Related Projects
+
+This project is designed to work with:
+
+- **CARLA Simulator** (0.9.15): https://carla.org
+- **PiRacer** (future integration): Real vehicle deployment
+
+## 📝 License
+
+See [LICENSE](LICENSE) file.
 
 ## 🆘 Getting Help
 
-1. **Dev Container issues**: See [DEVCONTAINER_SETUP.md](DEVCONTAINER_SETUP.md)
-2. **Connection issues**: Check firewall and network
-3. **Performance issues**: Try Remote SSH instead
+1. **Start with docs**: Check [docs/START_HERE.md](docs/START_HERE.md)
+2. **Check troubleshooting**: See sections above
+3. **Architecture questions**: See [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md)
+4. **M1 Mac issues**: See [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md)
+
+## ✅ Quick Reference
+
+### Entry Points
+
+| File | Use Case |
+|------|----------|
+| `main_modular.py` | Single-process, easy testing |
+| `main_distributed_v2.py` | Multi-process, production, web viewer |
+| `detection_server.py` | Standalone detection service |
+
+### Command Templates
+
+```bash
+# Local development
+python main_modular.py --method cv
+
+# Remote CARLA
+python main_modular.py --method cv --host 192.168.1.100
+
+# Distributed with web viewer (Docker/Remote friendly)
+python detection_server.py --port 5555 &
+python main_distributed_v2.py --viewer web --web-port 8080
+
+# Headless mode
+python main_modular.py --method cv --no-display
+
+# Custom config
+python main_modular.py --config my_config.yaml
+```
 
 ---
 
-## Summary
-
-✅ **What you need to understand:**
-
-1. **M1 Mac can't run CARLA natively** (neither client nor server)
-2. **Solution**:
-   - CARLA **client** runs in Docker on M1 (x86_64 emulation)
-   - CARLA **server** runs on remote Linux machine (native)
-   - They communicate over network
-3. **Dev Container** makes this seamless in VSCode
-4. **Performance** is acceptable for development
-5. **PiRacer** won't need any of this! 🎉
-
-Ready to start? Open [DEVCONTAINER_SETUP.md](DEVCONTAINER_SETUP.md)!
+**Ready to start?** 👉 Open [docs/START_HERE.md](docs/START_HERE.md)
