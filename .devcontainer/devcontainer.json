@@ -57,7 +57,7 @@
 	},
 
 	// Forward ports from container to host
-	"forwardPorts": [],
+	"forwardPorts": [8080, 5555],
 
 	// Post-create command to set up environment
 	"postCreateCommand": "pip install --no-cache-dir -r requirements.txt && echo '✅ Dev Container ready! Connect to remote CARLA server with: python main.py --host <REMOTE_IP> --port 2000'",
@@ -66,6 +66,15 @@
 	"portsAttributes": {
 		"2000": {
 			"label": "CARLA RPC",
+			"onAutoForward": "notify"
+		},
+		"8080": {
+			"label": "Web Viewer",
+			"onAutoForward": "openBrowser",
+			"protocol": "http"
+		},
+		"5555": {
+			"label": "Detection Server",
 			"onAutoForward": "notify"
 		}
 	},
