@@ -75,6 +75,15 @@ class ControllerConfig:
 
 
 @dataclass
+class ThrottlePolicyConfig:
+    """Adaptive throttle policy configuration."""
+    base: float = 0.45              # Base throttle when steering is minimal
+    min: float = 0.18               # Minimum throttle during sharp turns
+    steer_threshold: float = 0.15   # Steering magnitude to start reducing throttle
+    steer_max: float = 0.70         # Maximum expected steering magnitude
+
+
+@dataclass
 class VisualizationConfig:
     """Visualization settings."""
     show_spectator_overlay: bool = True
@@ -108,6 +117,7 @@ class Config:
     dl_detector: DLDetectorConfig = field(default_factory=DLDetectorConfig)
     analyzer: AnalyzerConfig = field(default_factory=AnalyzerConfig)
     controller: ControllerConfig = field(default_factory=ControllerConfig)
+    throttle_policy: ThrottlePolicyConfig = field(default_factory=ThrottlePolicyConfig)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
 
     # General settings
@@ -195,12 +205,32 @@ class ConfigManager:
 
             # Parse analyzer config
             analyzer_cfg = AnalyzerConfig()
-            if 'lane_analysis' in data:
-                ana_data = data['lane_analysis']
+            if 'lane_analyzer' in data:
+                ana_data = data['lane_analyzer']
                 analyzer_cfg = AnalyzerConfig(
                     drift_threshold=ana_data.get('drift_threshold', analyzer_cfg.drift_threshold),
                     departure_threshold=ana_data.get('departure_threshold', analyzer_cfg.departure_threshold),
                     lane_width_meters=ana_data.get('lane_width_meters', analyzer_cfg.lane_width_meters),
+                )
+
+            # Parse controller config
+            controller_cfg = ControllerConfig()
+            if 'lane_analyzer' in data:
+                ctrl_data = data['lane_analyzer']
+                controller_cfg = ControllerConfig(
+                    kp=ctrl_data.get('kp', controller_cfg.kp),
+                    kd=ctrl_data.get('kd', controller_cfg.kd),
+                )
+
+            # Parse throttle policy config
+            throttle_cfg = ThrottlePolicyConfig()
+            if 'throttle_policy' in data:
+                throttle_data = data['throttle_policy']
+                throttle_cfg = ThrottlePolicyConfig(
+                    base=throttle_data.get('base', throttle_cfg.base),
+                    min=throttle_data.get('min', throttle_cfg.min),
+                    steer_threshold=throttle_data.get('steer_threshold', throttle_cfg.steer_threshold),
+                    steer_max=throttle_data.get('steer_max', throttle_cfg.steer_max),
                 )
 
             # Create config object
@@ -209,6 +239,8 @@ class ConfigManager:
                 camera=camera_cfg,
                 cv_detector=cv_cfg,
                 analyzer=analyzer_cfg,
+                controller=controller_cfg,
+                throttle_policy=throttle_cfg,
             )
 
             return config

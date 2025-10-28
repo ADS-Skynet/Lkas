@@ -95,6 +95,7 @@ class CVLaneDetector(LaneDetector):
         # Lane tracking state
         self.prev_left_lane: Optional[Lane] = None  # Type hint: Optional[Lane]
         self.prev_right_lane: Optional[Lane] = None
+        self.frame_count = 0  # Track number of detections for adaptive smoothing
 
     # =========================================================================
     # IMPLEMENTING ABSTRACT INTERFACE METHODS
@@ -145,9 +146,12 @@ class CVLaneDetector(LaneDetector):
         left_lane = Lane.from_tuple(left_lane_tuple) if left_lane_tuple else None
         right_lane = Lane.from_tuple(right_lane_tuple) if right_lane_tuple else None
 
-        # Apply temporal smoothing
-        left_lane = self._smooth_lane(left_lane, self.prev_left_lane)
-        right_lane = self._smooth_lane(right_lane, self.prev_right_lane)
+        # Increment frame count for adaptive smoothing
+        self.frame_count += 1
+
+        # Apply temporal smoothing with adaptive factor
+        left_lane = self._smooth_lane_adaptive(left_lane, self.prev_left_lane)
+        right_lane = self._smooth_lane_adaptive(right_lane, self.prev_right_lane)
 
         # Update previous lanes
         self.prev_left_lane = left_lane
@@ -189,6 +193,22 @@ class CVLaneDetector(LaneDetector):
             'hough_max_line_gap': self.hough_max_line_gap,
             'smoothing_factor': self.smoothing_factor,
         }
+
+    def reset_smoothing(self):
+        """
+        Reset temporal smoothing state.
+
+        Clears previous lane history, allowing detector to respond
+        immediately to new detections without contamination from old data.
+
+        Use cases:
+        - After warmup period (clear bad initial detections)
+        - When changing lanes
+        - When detection confidence is low for extended period
+        """
+        self.prev_left_lane = None
+        self.prev_right_lane = None
+        self.frame_count = 0
 
     # =========================================================================
     # PRIVATE HELPER METHODS
@@ -309,6 +329,48 @@ class CVLaneDetector(LaneDetector):
         y1 = int(self.smoothing_factor * current_lane.y1 + (1 - self.smoothing_factor) * previous_lane.y1)
         x2 = int(self.smoothing_factor * current_lane.x2 + (1 - self.smoothing_factor) * previous_lane.x2)
         y2 = int(self.smoothing_factor * current_lane.y2 + (1 - self.smoothing_factor) * previous_lane.y2)
+
+        # Create new Lane object with smoothed coordinates
+        return Lane(x1=x1, y1=y1, x2=x2, y2=y2, confidence=current_lane.confidence)
+
+    def _smooth_lane_adaptive(self, current_lane: Optional[Lane],
+                              previous_lane: Optional[Lane]) -> Optional[Lane]:
+        """
+        Adaptive temporal smoothing that reduces smoothing during startup.
+
+        During the first ~50 frames, uses lower smoothing factor to allow
+        detector to respond quickly and not be contaminated by bad initial
+        detections from spawn point.
+
+        Smoothing schedule:
+        - Frames 0-20:   factor = 0.95 (95% new, 5% old) - Very responsive
+        - Frames 21-50:  factor = 0.80 (80% new, 20% old) - Medium smoothing
+        - Frames 51+:    factor = 0.70 (70% new, 30% old) - Full smoothing (configured value)
+
+        This matches the warmup period in main.py!
+        """
+        if current_lane is None:
+            return previous_lane
+
+        if previous_lane is None:
+            return current_lane
+
+        # Determine adaptive smoothing factor based on frame count
+        if self.frame_count <= 20:
+            # Early frames: Minimal smoothing - respond quickly
+            adaptive_factor = 0.95
+        elif self.frame_count <= 50:
+            # Warmup period: Medium smoothing
+            adaptive_factor = 0.80
+        else:
+            # After warmup: Full smoothing (use configured value)
+            adaptive_factor = self.smoothing_factor
+
+        # Apply smoothing to each coordinate
+        x1 = int(adaptive_factor * current_lane.x1 + (1 - adaptive_factor) * previous_lane.x1)
+        y1 = int(adaptive_factor * current_lane.y1 + (1 - adaptive_factor) * previous_lane.y1)
+        x2 = int(adaptive_factor * current_lane.x2 + (1 - adaptive_factor) * previous_lane.x2)
+        y2 = int(adaptive_factor * current_lane.y2 + (1 - adaptive_factor) * previous_lane.y2)
 
         # Create new Lane object with smoothed coordinates
         return Lane(x1=x1, y1=y1, x2=x2, y2=y2, confidence=current_lane.confidence)

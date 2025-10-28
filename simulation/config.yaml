@@ -53,6 +53,14 @@ lane_analyzer:
   kp: 0.5  # Proportional gain
   kd: 0.1  # Derivative gain
 
+# Throttle Control Policy
+# Adaptive throttle reduces speed during sharp turns to prevent overshooting
+throttle_policy:
+  base: 0.45              # Base throttle when steering is minimal
+  min: 0.18               # Minimum throttle during sharp turns
+  steer_threshold: 0.15   # Steering magnitude to start reducing throttle
+  steer_max: 0.70         # Maximum expected steering magnitude
+
 # Visualization
 visualization:
   show_hud: true

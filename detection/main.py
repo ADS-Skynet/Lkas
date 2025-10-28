@@ -112,7 +112,7 @@ def main():
     parser.add_argument(
         "--config", type=str, default="config.yaml", help="Path to configuration file"
     )
-    parser.add_argument("--port", type=int, default=5555, help="Port to listen on")
+    parser.add_argument("--port", type=int, default=5556, help="Port to listen on")
     parser.add_argument(
         "--host",
         type=str,

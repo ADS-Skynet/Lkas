@@ -15,7 +15,9 @@ class CARLAConnection:
     Responsibility: Connect to CARLA and provide world access.
     """
 
-    def __init__(self, host: str = 'localhost', port: int = 2000, timeout: float = 10.0):
+    def __init__(
+        self, host: str = "localhost", port: int = 2000, timeout: float = 10.0
+    ):
         """
         Initialize CARLA connection manager.
 
@@ -96,6 +98,18 @@ class CARLAConnection:
             return None
         return self.world.get_map()
 
+    def set_map(self, map_name: str):
+        """
+        Load a different map in CARLA.
+
+        Args:
+            map_name: Name of the map to load (e.g., 'Town01')
+        """
+        if self.client:
+            print(f"Loading map: {map_name}...")
+            self.world = self.client.load_world(map_name)
+            print(f"✓ Map loaded: {map_name}")
+
     def set_weather(self, weather: carla.WeatherParameters):
         """
         Set weather conditions.
@@ -116,3 +130,82 @@ class CARLAConnection:
         """Apply world settings."""
         if self.world:
             self.world.apply_settings(settings)
+
+    def setup_synchronous_mode(
+        self, enabled: bool = True, fixed_delta_seconds: float = 0.05
+    ):
+        """
+        Configure synchronous mode for deterministic simulation.
+
+        Args:
+            enabled: Enable synchronous mode
+            fixed_delta_seconds: Fixed time step for simulation (default: 0.05s = 20 FPS)
+        """
+        if not self.world:
+            print("✗ Cannot setup synchronous mode: not connected to world")
+            return
+
+        settings = self.world.get_settings()
+        settings.synchronous_mode = enabled
+        if enabled:
+            settings.fixed_delta_seconds = fixed_delta_seconds
+        self.world.apply_settings(settings)
+
+        mode_str = f"sync (Δt={fixed_delta_seconds}s)" if enabled else "async"
+        print(f"✓ World mode set to: {mode_str}")
+
+    def cleanup_world(self):
+        """
+        Remove all pedestrians and vehicles from the world.
+        Useful for clean simulation environment.
+        """
+        if not self.world:
+            print("✗ Cannot cleanup world: not connected")
+            return
+
+        actors = self.world.get_actors()
+
+        # Remove all pedestrians
+        walkers = actors.filter("*walker.pedestrian*")
+        destroyed_walkers = 0
+        for walker in walkers:
+            try:
+                walker.destroy()
+                destroyed_walkers += 1
+            except:
+                pass
+
+        # Remove all vehicles
+        vehicles = actors.filter("*vehicle*")
+        destroyed_vehicles = 0
+        for vehicle in vehicles:
+            try:
+                vehicle.destroy()
+                destroyed_vehicles += 1
+            except:
+                pass
+
+        print(
+            f"✓ World cleaned: removed {destroyed_walkers} pedestrians and {destroyed_vehicles} vehicles"
+        )
+
+    def set_all_traffic_lights_green(self):
+        """
+        Set all traffic lights to green and freeze them.
+        Prevents traffic lights from interfering with autonomous driving.
+        """
+        if not self.world:
+            print("✗ Cannot set traffic lights: not connected")
+            return
+
+        traffic_lights = self.world.get_actors().filter("*traffic_light*")
+        count = 0
+        for light in traffic_lights:
+            try:
+                light.set_state(carla.TrafficLightState.Green)
+                light.freeze(True)
+                count += 1
+            except:
+                pass
+
+        print(f"✓ Set {count} traffic lights to GREEN and frozen")

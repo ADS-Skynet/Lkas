@@ -25,14 +25,16 @@ class WebViewer:
     Perfect for remote development, Docker, or headless servers.
     """
 
-    def __init__(self, port: int = 8080):
+    def __init__(self, port: int = 8080, quiet: bool = False):
         """
         Initialize web viewer.
 
         Args:
             port: HTTP server port
+            quiet: If True, suppress URL output (prevents auto-open in some terminals)
         """
         self.port = port
+        self.quiet = quiet
         self.latest_image: Optional[np.ndarray] = None
         self.server: Optional[HTTPServer] = None
         self.server_thread: Optional[threading.Thread] = None
@@ -49,10 +51,18 @@ class WebViewer:
 
         class ViewerRequestHandler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
-                # Suppress HTTP logs
+                # Suppress HTTP logs (comment out to debug)
+                # Uncomment the line below to see all HTTP requests:
+                # print(f"[HTTP] {format % args}")
                 pass
 
             def do_GET(self):
+                # Debug: Log first few requests
+                if not hasattr(viewer_self, '_request_count'):
+                    viewer_self._request_count = 0
+                viewer_self._request_count += 1
+                if viewer_self._request_count <= 10:
+                    print(f"[WebViewer] Request #{viewer_self._request_count}: {self.path}")
                 if self.path == '/':
                     # Serve HTML page
                     self.send_response(200)
@@ -63,7 +73,8 @@ class WebViewer:
 
                 elif self.path == '/stream':
                     # Serve MJPEG stream
-                    print("[WebViewer] Stream request received")
+                    if viewer_self._request_count <= 10:
+                        print("[WebViewer] Stream request received")
                     self.send_response(200)
                     self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=--jpgboundary')
                     self.send_header('Cache-Control', 'no-cache, private')
@@ -94,6 +105,11 @@ class WebViewer:
                             time.sleep(0.033)  # ~30 FPS
                     except Exception as e:
                         print(f"[WebViewer] Stream ended: {e}")
+
+                elif self.path == '/favicon.ico':
+                    # Return empty favicon to prevent browser from retrying
+                    self.send_response(204)  # No Content
+                    self.end_headers()
 
                 else:
                     self.send_error(404)
@@ -198,9 +214,14 @@ class WebViewer:
         self.running = True
         self.server_thread.start()
 
-        print(f"\n✓ Web viewer started")
-        print(f"  View at: http://localhost:{self.port}")
-        print(f"  Press Ctrl+C to stop\n")
+        if not self.quiet:
+            print(f"\n✓ Web viewer started")
+            # Format URL in a way that's less likely to auto-open (VSCode/terminal detection)
+            print(f"  View at: http://localhost:{self.port}")
+            print(f"  (Copy and paste the URL manually into your browser)")
+            print(f"  Press Ctrl+C to stop\n")
+        else:
+            print(f"✓ Web viewer started on port {self.port}")
 
     def update(self, image: np.ndarray):
         """

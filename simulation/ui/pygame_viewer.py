@@ -35,10 +35,23 @@ class PygameViewer:
         self.height = height
         self.title = title
 
-        # Initialize pygame
+        # Initialize pygame with software rendering (fixes Docker/remote issues)
+        import os
+        os.environ['SDL_VIDEODRIVER'] = 'x11'  # Force X11 (not Wayland)
+        os.environ['SDL_RENDER_DRIVER'] = 'software'  # Force software rendering (no OpenGL)
+
         pygame.init()
-        self.screen = pygame.display.set_mode((width, height))
-        pygame.display.set_caption(title)
+
+        # Try to create display with software rendering
+        try:
+            # Attempt with SWSURFACE flag (software surface, no hardware acceleration)
+            self.screen = pygame.display.set_mode((width, height), pygame.SWSURFACE)
+            pygame.display.set_caption(title)
+        except Exception as e:
+            print(f"✗ Failed to create pygame window: {e}")
+            print("  Pygame may not work in this environment.")
+            print("  Try using --viewer web instead (works without X11)")
+            raise
 
         self.clock = pygame.time.Clock()
         self.running = True

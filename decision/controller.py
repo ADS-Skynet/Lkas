@@ -33,7 +33,12 @@ class DecisionController:
     """
 
     def __init__(
-        self, image_width: int, image_height: int, kp: float = 0.5, kd: float = 0.1
+        self,
+        image_width: int,
+        image_height: int,
+        kp: float = 0.5,
+        kd: float = 0.1,
+        throttle_policy: Optional[dict] = None,
     ):
         """
         Initialize decision controller.
@@ -43,6 +48,11 @@ class DecisionController:
             image_height: Camera image height
             kp: Proportional gain for steering control
             kd: Derivative gain for steering control
+            throttle_policy: Adaptive throttle configuration dict with keys:
+                - base: Base throttle value (default: 0.45)
+                - min: Minimum throttle value (default: 0.18)
+                - steer_threshold: Steering magnitude to start reducing throttle (default: 0.15)
+                - steer_max: Maximum steering for throttle calculation (default: 0.70)
         """
         # Lane analysis
         self.analyzer = LaneAnalyzer(image_width=image_width, image_height=image_height)
@@ -50,12 +60,52 @@ class DecisionController:
         # Steering control
         self.pd_controller = PDController(kp=kp, kd=kd)
 
-        # Default throttle/brake
+        # Adaptive throttle policy
+        self.throttle_policy = throttle_policy or {
+            "base": 0.45,
+            "min": 0.18,
+            "steer_threshold": 0.15,
+            "steer_max": 0.70,
+        }
+
+        # Default throttle/brake (used when adaptive throttle is disabled)
         self.default_throttle = 0.3
         self.default_brake = 0.0
+        self.use_adaptive_throttle = throttle_policy is not None
 
         # Control mode
         self.mode = ControlMode.LANE_KEEPING
+
+    def compute_adaptive_throttle(self, steering: float) -> float:
+        """
+        Compute adaptive throttle based on steering magnitude.
+
+        The throttle decreases as steering increases to prevent overshooting in turns.
+        This helps maintain stable control during sharp maneuvers.
+
+        Args:
+            steering: Steering value in range [-1, 1]
+
+        Returns:
+            Throttle value in range [throttle_min, throttle_base]
+        """
+        abs_steering = abs(steering)
+        policy = self.throttle_policy
+
+        # If steering is below threshold, use base throttle
+        if abs_steering <= policy["steer_threshold"]:
+            return policy["base"]
+
+        # Calculate linear interpolation factor between threshold and max
+        steer_range = policy["steer_max"] - policy["steer_threshold"]
+        steer_delta = abs_steering - policy["steer_threshold"]
+        t = max(0.0, min(1.0, steer_delta / max(1e-6, steer_range)))
+
+        # Interpolate between base and min throttle
+        throttle_range = policy["base"] - policy["min"]
+        throttle = policy["base"] - (throttle_range * t)
+
+        return max(policy["min"], min(policy["base"], throttle))
 
     def process_detection(self, detection: DetectionMessage) -> ControlMessage:
         """
@@ -100,7 +150,11 @@ class DecisionController:
             throttle = 0.0
             brake = 0.3
         else:
-            throttle = self.default_throttle
+            # Use adaptive throttle if enabled, otherwise use default
+            if self.use_adaptive_throttle:
+                throttle = self.compute_adaptive_throttle(steering)
+            else:
+                throttle = self.default_throttle
             brake = self.default_brake
 
         # Create control message

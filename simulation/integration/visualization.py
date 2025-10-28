@@ -54,10 +54,14 @@ class VisualizationManager:
             try:
                 from simulation.ui.pygame_viewer import PygameViewer
                 self.viewer = PygameViewer(self.width, self.height)
-                print("✓ Using Pygame viewer (better X11 support)")
+                print("✓ Using Pygame viewer (software rendering)")
             except ImportError:
                 print("⚠ Pygame not available, falling back to OpenCV")
                 print("  Install with: pip install pygame")
+                self.viewer = OpenCVViewer(self.width, self.height)
+            except Exception as e:
+                print(f"⚠ Pygame failed to initialize: {e}")
+                print("  Falling back to OpenCV viewer")
                 self.viewer = OpenCVViewer(self.width, self.height)
 
         elif self.viewer_type == 'web':
@@ -65,8 +69,8 @@ class VisualizationManager:
                 from simulation.ui.web_viewer import WebViewer
                 self.viewer = WebViewer(self.web_port)
                 self.viewer.start()
-                print(f"✓ Using Web viewer")
-                print(f"  View at: http://localhost:{self.web_port}")
+                print(f"✓ Using Web viewer on port {self.web_port}")
+                # URL is printed by web_viewer.py and main.py, don't print it here too
             except Exception as e:
                 print(f"⚠ Web viewer failed: {e}")
                 print("  Falling back to OpenCV")
@@ -160,6 +164,7 @@ def auto_select_viewer() -> ViewerType:
         Best viewer type for environment
     """
     import os
+    import subprocess
 
     # Check if we're in Docker/headless
     if not os.environ.get('DISPLAY'):
@@ -171,10 +176,28 @@ def auto_select_viewer() -> ViewerType:
         print("WSL detected, using web viewer")
         return 'web'
 
+    # Check if we're in Docker
+    if os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv'):
+        print("Docker/container detected, using web viewer (most reliable)")
+        return 'web'
+
+    # Check if OpenGL/GLX is available (needed for pygame)
+    try:
+        result = subprocess.run(['glxinfo'], capture_output=True, timeout=2)
+        if result.returncode != 0:
+            # glxinfo failed, OpenGL not available
+            print("OpenGL not available, using OpenCV (software rendering)")
+            return 'opencv'
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # glxinfo not installed or timed out
+        pass
+
     # Check if pygame is available (better for X11 forwarding)
     try:
         import pygame
-        return 'pygame'
+        # Pygame available, but prefer opencv in Docker-like environments
+        # since pygame often has GLX issues
+        return 'opencv'  # Changed from 'pygame' to 'opencv' for stability
     except ImportError:
         pass
 
