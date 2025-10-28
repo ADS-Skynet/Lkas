@@ -29,14 +29,16 @@ class VehicleManager:
 
         # Spawn points
         self.spawn_points: List[carla.Transform] = []
-        self.current_spawn_index: int = 0
+        self.current_spawn_index: int = 0  # Index of pre-defined spawn point
 
         # Autopilot state
         self.autopilot_enabled: bool = False
 
-    def spawn_vehicle(self,
-                      vehicle_type: str = 'vehicle.tesla.model3',
-                      spawn_point_index: Optional[int] = None) -> bool:
+    def spawn_vehicle(
+        self,
+        vehicle_type: str = "vehicle.tesla.model3",
+        spawn_point_index: Optional[int] = None,
+    ) -> bool:
         """
         Spawn a vehicle in the world.
 
@@ -152,7 +154,9 @@ class VehicleManager:
 
         if index is None:
             # Cycle to next spawn point
-            self.current_spawn_index = (self.current_spawn_index + 1) % len(self.spawn_points)
+            self.current_spawn_index = (self.current_spawn_index + 1) % len(
+                self.spawn_points
+            )
         else:
             if index >= len(self.spawn_points):
                 return False
@@ -163,7 +167,9 @@ class VehicleManager:
         print(f"✓ Teleported to spawn point {self.current_spawn_index}")
         return True
 
-    def apply_control(self, steering: float = 0.0, throttle: float = 0.0, brake: float = 0.0):
+    def apply_control(
+        self, steering: float = 0.0, throttle: float = 0.0, brake: float = 0.0
+    ):
         """
         Apply control to vehicle.
 
@@ -218,5 +224,5 @@ class VehicleManager:
             return 0.0
 
         velocity = self.vehicle.get_velocity()
-        speed_ms = (velocity.x**2 + velocity.y**2 + velocity.z**2)**0.5
+        speed_ms = (velocity.x**2 + velocity.y**2 + velocity.z**2) ** 0.5
         return speed_ms * 3.6  # Convert m/s to km/h

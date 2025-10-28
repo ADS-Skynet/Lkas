@@ -209,8 +209,7 @@ def main():
     # Main loop
     print("\n" + "=" * 60)
     print("System Running")
-    if viewer_type == "web":
-        print(f"View at: http://localhost:{args.web_port}")
+    # URL already printed by web_viewer.py, don't print again
     print("Press Ctrl+C to quit")
     print("=" * 60 + "\n")
 
@@ -221,10 +220,15 @@ def main():
 
     # Print initialization strategy
     print(f"\n🚀 Initialization Strategy:")
-    print(
-        f"   Warmup: {args.warmup_frames} frames with base throttle ({args.base_throttle})"
-    )
-    print(f"   Then: Full lane-keeping control with adaptive throttle")
+    print(f"   Warmup: {args.warmup_frames} frames (~{args.warmup_frames/20:.1f} seconds)")
+    print(f"   During warmup:")
+    print(f"     - Steering: LOCKED at 0.0 (go straight, ignore detections)")
+    print(f"     - Throttle: Fixed at {args.base_throttle}")
+    print(f"     - Reason: Early detections are unstable!")
+    print(f"   After warmup:")
+    print(f"     - Steering: From lane detection (PD controller)")
+    print(f"     - Throttle: Adaptive ({config.throttle_policy.min}-{config.throttle_policy.base})")
+    print(f"     - Full lane-keeping control")
 
     try:
         while True:
@@ -251,8 +255,8 @@ def main():
                 # During warmup or timeout: use base throttle to keep moving
                 control = ControlMessage(
                     steering=0.0,
-                    throttle=args.base_throttle,  # Changed from 0.0 to base_throttle
-                    brake=0.0,  # Changed from 0.3 to 0.0
+                    throttle=args.base_throttle,
+                    brake=0.0,
                     mode=ControlMode.LANE_KEEPING,
                 )
                 if frame_count < 5:  # Print first few timeouts
@@ -260,34 +264,44 @@ def main():
                         f"⚠ Detection timeout on frame {frame_count} - using base throttle"
                     )
             else:
+                # Detection available, but might be unstable during warmup
                 control = controller.process_detection(detection)
 
             # Apply control
             if not vehicle_mgr.is_autopilot_enabled():
-                # Determine final throttle
+                # Determine final steering and throttle
                 if args.force_throttle is not None:
                     # Override for testing
+                    steering = control.steering
                     throttle = args.force_throttle
                 elif in_warmup:
-                    # During warmup: blend base throttle with computed steering
+                    # During warmup: IGNORE unstable steering, go straight with base throttle
+                    steering = 0.0  # GO STRAIGHT - don't trust early detections!
                     throttle = args.base_throttle
                     if frame_count == args.warmup_frames - 1:
                         warmup_complete = True
                         print(
-                            f"\n✅ Warmup complete! Switching to full adaptive control.\n"
+                            f"\n✅ Warmup complete! Detections stabilized. Switching to full lane-keeping control.\n"
                         )
                 else:
-                    # After warmup: use adaptive throttle from controller
+                    # After warmup: use full control (both steering and adaptive throttle)
+                    steering = control.steering
                     throttle = control.throttle
 
-                vehicle_mgr.apply_control(control.steering, throttle, control.brake)
+                vehicle_mgr.apply_control(steering, throttle, control.brake)
                 if frame_count < 5 or (
                     in_warmup and frame_count % 10 == 0
                 ):  # Print during warmup
                     mode = "WARMUP" if in_warmup else "ACTIVE"
-                    print(
-                        f"[{mode}] Frame {frame_count:3d}: steering={control.steering:+.3f}, throttle={throttle:.3f}, brake={control.brake:.3f}"
-                    )
+                    if in_warmup:
+                        print(
+                            f"[{mode}] Frame {frame_count:3d}: steering={steering:+.3f} (forced=0.0), "
+                            f"throttle={throttle:.3f}, detected_steering={control.steering:+.3f} (ignored)"
+                        )
+                    else:
+                        print(
+                            f"[{mode}] Frame {frame_count:3d}: steering={steering:+.3f}, throttle={throttle:.3f}, brake={control.brake:.3f}"
+                        )
 
             # Visualize
             if not args.no_display:
