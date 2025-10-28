@@ -15,7 +15,9 @@ class CARLAConnection:
     Responsibility: Connect to CARLA and provide world access.
     """
 
-    def __init__(self, host: str = 'localhost', port: int = 2000, timeout: float = 10.0):
+    def __init__(
+        self, host: str = "localhost", port: int = 2000, timeout: float = 10.0
+    ):
         """
         Initialize CARLA connection manager.
 
@@ -96,6 +98,18 @@ class CARLAConnection:
             return None
         return self.world.get_map()
 
+    def set_map(self, map_name: str):
+        """
+        Load a different map in CARLA.
+
+        Args:
+            map_name: Name of the map to load (e.g., 'Town01')
+        """
+        if self.client:
+            print(f"Loading map: {map_name}...")
+            self.world = self.client.load_world(map_name)
+            print(f"✓ Map loaded: {map_name}")
+
     def set_weather(self, weather: carla.WeatherParameters):
         """
         Set weather conditions.
@@ -117,7 +131,9 @@ class CARLAConnection:
         if self.world:
             self.world.apply_settings(settings)
 
-    def setup_synchronous_mode(self, enabled: bool = True, fixed_delta_seconds: float = 0.05):
+    def setup_synchronous_mode(
+        self, enabled: bool = True, fixed_delta_seconds: float = 0.05
+    ):
         """
         Configure synchronous mode for deterministic simulation.
 
@@ -150,7 +166,7 @@ class CARLAConnection:
         actors = self.world.get_actors()
 
         # Remove all pedestrians
-        walkers = actors.filter('*walker.pedestrian*')
+        walkers = actors.filter("*walker.pedestrian*")
         destroyed_walkers = 0
         for walker in walkers:
             try:
@@ -160,7 +176,7 @@ class CARLAConnection:
                 pass
 
         # Remove all vehicles
-        vehicles = actors.filter('*vehicle*')
+        vehicles = actors.filter("*vehicle*")
         destroyed_vehicles = 0
         for vehicle in vehicles:
             try:
@@ -169,7 +185,9 @@ class CARLAConnection:
             except:
                 pass
 
-        print(f"✓ World cleaned: removed {destroyed_walkers} pedestrians and {destroyed_vehicles} vehicles")
+        print(
+            f"✓ World cleaned: removed {destroyed_walkers} pedestrians and {destroyed_vehicles} vehicles"
+        )
 
     def set_all_traffic_lights_green(self):
         """
@@ -180,7 +198,7 @@ class CARLAConnection:
             print("✗ Cannot set traffic lights: not connected")
             return
 
-        traffic_lights = self.world.get_actors().filter('*traffic_light*')
+        traffic_lights = self.world.get_actors().filter("*traffic_light*")
         count = 0
         for light in traffic_lights:
             try:

@@ -30,6 +30,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import cv2
 import time
+from collections import deque
+from typing import Optional
 from detection.core.config import ConfigManager
 from simulation.integration.visualization import (
     VisualizationManager,
@@ -44,6 +46,174 @@ from simulation.integration.messages import (
     ControlMessage,
     ControlMode,
 )
+
+
+class LatencyStats:
+    """Track and analyze latency at different pipeline stages."""
+
+    def __init__(self, window_size: int = 100):
+        """Initialize latency tracker.
+
+        Args:
+            window_size: Number of samples to keep for rolling statistics
+        """
+        self.window_size = window_size
+
+        # Latency components (in milliseconds)
+        self.capture_to_request = deque(
+            maxlen=window_size
+        )  # Camera capture to ZMQ send
+        self.network_roundtrip = deque(maxlen=window_size)  # ZMQ request-reply time
+        self.detection_processing = deque(
+            maxlen=window_size
+        )  # Detector's internal processing
+        self.control_processing = deque(maxlen=window_size)  # Control computation time
+        self.total_latency = deque(maxlen=window_size)  # End-to-end latency
+
+        # Timestamps for current frame
+        self.t_capture: Optional[float] = None
+        self.t_request_sent: Optional[float] = None
+        self.t_response_received: Optional[float] = None
+        self.t_control_applied: Optional[float] = None
+
+    def mark_capture(self):
+        """Mark image capture timestamp."""
+        self.t_capture = time.time()
+
+    def mark_request_sent(self):
+        """Mark detection request sent timestamp."""
+        self.t_request_sent = time.time()
+
+    def mark_response_received(self, detection_processing_ms: float):
+        """Mark detection response received timestamp.
+
+        Args:
+            detection_processing_ms: Processing time reported by detector
+        """
+        self.t_response_received = time.time()
+
+        # Record detection processing time (from detector)
+        self.detection_processing.append(detection_processing_ms)
+
+        # Calculate latencies
+        if self.t_capture and self.t_request_sent:
+            capture_to_req = (self.t_request_sent - self.t_capture) * 1000
+            self.capture_to_request.append(capture_to_req)
+
+        if self.t_request_sent and self.t_response_received:
+            network = (self.t_response_received - self.t_request_sent) * 1000
+            self.network_roundtrip.append(network)
+
+    def mark_control_applied(self):
+        """Mark control applied timestamp."""
+        self.t_control_applied = time.time()
+
+        # Calculate control processing time
+        if self.t_response_received and self.t_control_applied:
+            control = (self.t_control_applied - self.t_response_received) * 1000
+            self.control_processing.append(control)
+
+        # Calculate total end-to-end latency
+        if self.t_capture and self.t_control_applied:
+            total = (self.t_control_applied - self.t_capture) * 1000
+            self.total_latency.append(total)
+
+    def get_stats(self) -> dict:
+        """Get statistics for all latency components.
+
+        Returns:
+            Dictionary with min/avg/max for each component
+        """
+
+        def stats(data):
+            if not data:
+                return {"min": 0.0, "avg": 0.0, "max": 0.0}
+            return {
+                "min": min(data),
+                "avg": sum(data) / len(data),
+                "max": max(data),
+            }
+
+        return {
+            "capture_to_request": stats(self.capture_to_request),
+            "network_roundtrip": stats(self.network_roundtrip),
+            "detection_processing": stats(self.detection_processing),
+            "control_processing": stats(self.control_processing),
+            "total_latency": stats(self.total_latency),
+            "sample_count": len(self.total_latency),
+        }
+
+    def print_report(self, frame_count: int):
+        """Print comprehensive latency report.
+
+        Args:
+            frame_count: Current frame number
+        """
+        stats = self.get_stats()
+
+        if stats["sample_count"] == 0:
+            return
+
+        print(f"\n{'='*70}")
+        print(
+            f"LATENCY REPORT - Frame {frame_count} (Last {stats['sample_count']} samples)"
+        )
+        print(f"{'='*70}")
+
+        # Header
+        print(f"{'Component':<25} {'Min (ms)':>12} {'Avg (ms)':>12} {'Max (ms)':>12}")
+        print(f"{'-'*70}")
+
+        # Each component
+        components = [
+            ("Capture → Request", "capture_to_request"),
+            ("Network Round-trip", "network_roundtrip"),
+            ("Detection Processing", "detection_processing"),
+            ("Control Processing", "control_processing"),
+            ("─" * 25, None),  # Separator
+            ("TOTAL END-TO-END", "total_latency"),
+        ]
+
+        for label, key in components:
+            if key is None:
+                print(f"{label}")
+                continue
+
+            data = stats[key]
+            print(
+                f"{label:<25} {data['min']:>12.2f} {data['avg']:>12.2f} {data['max']:>12.2f}"
+            )
+
+        print(f"{'='*70}")
+
+        # Breakdown percentages
+        total_avg = stats["total_latency"]["avg"]
+        if total_avg > 0:
+            print(f"\nLatency Breakdown (% of total {total_avg:.2f}ms):")
+            print(
+                f"  Capture → Request:   {stats['capture_to_request']['avg']/total_avg*100:5.1f}%"
+            )
+            print(
+                f"  Network Round-trip:  {stats['network_roundtrip']['avg']/total_avg*100:5.1f}%"
+            )
+            print(
+                f"  Detection Processing: {stats['detection_processing']['avg']/total_avg*100:5.1f}%"
+            )
+            print(
+                f"  Control Processing:  {stats['control_processing']['avg']/total_avg*100:5.1f}%"
+            )
+
+        # Bottleneck identification
+        bottleneck = max(
+            [
+                ("Network Round-trip", stats["network_roundtrip"]["avg"]),
+                ("Detection Processing", stats["detection_processing"]["avg"]),
+                ("Control Processing", stats["control_processing"]["avg"]),
+            ],
+            key=lambda x: x[1],
+        )
+        print(f"\n⚠ Primary Bottleneck: {bottleneck[0]} ({bottleneck[1]:.2f}ms)")
+        print(f"{'='*70}\n")
 
 
 def main():
@@ -99,6 +269,11 @@ def main():
         type=int,
         default=50,
         help="Frames to use base throttle before full control (default: 50)",
+    )
+    parser.add_argument(
+        "--latency",
+        action="store_true",
+        help="Enable latency tracking and reporting (adds overhead)",
     )
 
     args = parser.parse_args()
@@ -159,6 +334,9 @@ def main():
     # carla_conn.cleanup_world()
     # carla_conn.set_all_traffic_lights_green()
 
+    # World change (load specified town)
+    carla_conn.set_map("Town03")
+
     print("\n[3/5] Spawning vehicle...")
     vehicle_mgr = VehicleManager(carla_conn.get_world())
     if not vehicle_mgr.spawn_vehicle(config.carla.vehicle_type, args.spawn_point):
@@ -218,16 +396,27 @@ def main():
     last_print = time.time()
     warmup_complete = False
 
+    # Initialize latency tracker (optional)
+    latency_tracker = LatencyStats(window_size=100) if args.latency else None
+    if args.latency:
+        print("📊 Latency tracking ENABLED (adds ~0.1ms overhead per frame)")
+    else:
+        print("📊 Latency tracking DISABLED (use --latency to enable)")
+
     # Print initialization strategy
     print(f"\n🚀 Initialization Strategy:")
-    print(f"   Warmup: {args.warmup_frames} frames (~{args.warmup_frames/20:.1f} seconds)")
+    print(
+        f"   Warmup: {args.warmup_frames} frames (~{args.warmup_frames/20:.1f} seconds)"
+    )
     print(f"   During warmup:")
     print(f"     - Steering: LOCKED at 0.0 (go straight, ignore detections)")
     print(f"     - Throttle: Fixed at {args.base_throttle}")
     print(f"     - Reason: Early detections are unstable!")
     print(f"   After warmup:")
     print(f"     - Steering: From lane detection (PD controller)")
-    print(f"     - Throttle: Adaptive ({config.throttle_policy.min}-{config.throttle_policy.base})")
+    print(
+        f"     - Throttle: Adaptive ({config.throttle_policy.min}-{config.throttle_policy.base})"
+    )
     print(f"     - Full lane-keeping control")
 
     try:
@@ -241,18 +430,40 @@ def main():
             if image is None:
                 continue
 
+            # [LATENCY TRACKING] Mark image capture timestamp
+            if latency_tracker:
+                latency_tracker.mark_capture()
+
             # Send to detector
             image_msg = ImageMessage(
                 image=image, timestamp=time.time(), frame_id=frame_count
             )
+
+            # [LATENCY TRACKING] Mark request sent timestamp
+            if latency_tracker:
+                latency_tracker.mark_request_sent()
+
             detection = detector.detect(image_msg)
+
+            # [LATENCY TRACKING] Mark response received (with detection processing time)
+            if latency_tracker:
+                if detection is not None and hasattr(detection, "processing_time_ms"):
+                    latency_tracker.mark_response_received(detection.processing_time_ms)
+                elif detection is not None:
+                    # Estimate if processing time not available
+                    latency_tracker.mark_response_received(0.0)
 
             # Determine if we're still in warmup phase
             in_warmup = frame_count < args.warmup_frames
 
-            if detection is None:
+            # Check if we have valid detections (not None AND at least one lane exists)
+            has_valid_detection = detection is not None and (
+                detection.left_lane is not None or detection.right_lane is not None
+            )
+
+            if not has_valid_detection:
                 timeouts += 1
-                # During warmup or timeout: use base throttle to keep moving
+                # No detection or empty detection: use base throttle to keep moving
                 control = ControlMessage(
                     steering=0.0,
                     throttle=args.base_throttle,
@@ -260,11 +471,16 @@ def main():
                     mode=ControlMode.LANE_KEEPING,
                 )
                 if frame_count < 5:  # Print first few timeouts
-                    print(
-                        f"⚠ Detection timeout on frame {frame_count} - using base throttle"
-                    )
+                    if detection is None:
+                        print(
+                            f"⚠ Detection timeout on frame {frame_count} - using base throttle"
+                        )
+                    else:
+                        print(
+                            f"⚠ No lanes detected on frame {frame_count} - using base throttle"
+                        )
             else:
-                # Detection available, but might be unstable during warmup
+                # Valid detection available, but might be unstable during warmup
                 control = controller.process_detection(detection)
 
             # Apply control
@@ -289,6 +505,11 @@ def main():
                     throttle = control.throttle
 
                 vehicle_mgr.apply_control(steering, throttle, control.brake)
+
+                # [LATENCY TRACKING] Mark control applied timestamp
+                if latency_tracker:
+                    latency_tracker.mark_control_applied()
+
                 if frame_count < 5 or (
                     in_warmup and frame_count % 10 == 0
                 ):  # Print during warmup
@@ -391,11 +612,32 @@ def main():
                         f"{'L' if detection.left_lane else '-'}{'R' if detection.right_lane else '-'}"
                     )
                 )
-                print(
+
+                # Build status line with optional latency info
+                status_line = (
                     f"Frame {frame_count:5d} | FPS: {fps:5.1f} | Lanes: {lanes} | "
                     f"Steering: {control.steering:+.3f} | Timeouts: {timeouts}"
                 )
+
+                if latency_tracker:
+                    stats = latency_tracker.get_stats()
+                    total_latency = (
+                        stats["total_latency"]["avg"]
+                        if stats["sample_count"] > 0
+                        else 0.0
+                    )
+                    status_line += f" | Latency: {total_latency:6.2f}ms"
+
+                print(status_line)
                 last_print = time.time()
+
+            # Print detailed latency report every 90 frames (after warmup)
+            if (
+                latency_tracker
+                and frame_count > args.warmup_frames
+                and frame_count % 90 == 0
+            ):
+                latency_tracker.print_report(frame_count)
 
     except KeyboardInterrupt:
         print("\n\nStopping...")
