@@ -5,7 +5,7 @@ Handles vehicle spawning, control, and state management in CARLA.
 """
 
 import carla
-from typing import Optional, List
+from typing import List
 import random
 
 
@@ -24,8 +24,8 @@ class VehicleManager:
             world: CARLA world instance
         """
         self.world = world
-        self.vehicle: Optional[carla.Vehicle] = None
-        self.vehicle_type: Optional[str] = None
+        self.vehicle: carla.Vehicle | None = None
+        self.vehicle_type: str | None = None
 
         # Spawn points
         self.spawn_points: List[carla.Transform] = []
@@ -37,7 +37,7 @@ class VehicleManager:
     def spawn_vehicle(
         self,
         vehicle_type: str = "vehicle.tesla.model3",
-        spawn_point_index: Optional[int] = None,
+        spawn_point_index: int | None = None,
     ) -> bool:
         """
         Spawn a vehicle in the world.
@@ -139,7 +139,7 @@ class VehicleManager:
             print(f"✗ Respawn failed: {e}")
             return False
 
-    def teleport_to_spawn_point(self, index: Optional[int] = None) -> bool:
+    def teleport_to_spawn_point(self, index: int | None = None) -> bool:
         """
         Teleport vehicle to a spawn point.
 
@@ -202,17 +202,17 @@ class VehicleManager:
         """Check if autopilot is enabled."""
         return self.autopilot_enabled
 
-    def get_vehicle(self) -> Optional[carla.Vehicle]:
+    def get_vehicle(self) -> carla.Vehicle | None:
         """Get vehicle instance."""
         return self.vehicle
 
-    def get_transform(self) -> Optional[carla.Transform]:
+    def get_transform(self) -> carla.Transform | None:
         """Get vehicle transform."""
         if self.vehicle:
             return self.vehicle.get_transform()
         return None
 
-    def get_velocity(self) -> Optional[carla.Vector3D]:
+    def get_velocity(self) -> carla.Vector3D | None:
         """Get vehicle velocity."""
         if self.vehicle:
             return self.vehicle.get_velocity()

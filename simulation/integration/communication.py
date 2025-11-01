@@ -16,13 +16,13 @@ import zmq
 import numpy as np
 import time
 import json
-from typing import Optional, Tuple
+
 from dataclasses import asdict
 
 from .messages import ImageMessage, DetectionMessage, LaneMessage
 
 
-class ImageSerializer:
+class InputSerial:
     """
     Efficient image serialization for network transfer.
 
@@ -112,7 +112,7 @@ class ImageSerializer:
         )
 
 
-class DetectionSerializer:
+class OutputSerial:
     """
     Serialization for detection results.
 
@@ -203,7 +203,7 @@ class DetectionClient:
         # Try to connect with retries
         self._connect_with_retry()
 
-    def detect(self, image_msg: ImageMessage) -> Optional[DetectionMessage]:
+    def detect(self, image_msg: ImageMessage) -> DetectionMessage | None:
         """
         Send image to server and receive detection results.
 
@@ -215,12 +215,12 @@ class DetectionClient:
         """
         try:
             # Serialize and send image
-            message_bytes = ImageSerializer.serialize(image_msg)
+            message_bytes = InputSerial.serialize(image_msg)
             self.socket.send(message_bytes)
 
             # Receive detection results
             response_bytes = self.socket.recv()
-            detection = DetectionSerializer.deserialize(response_bytes)
+            detection = OutputSerial.deserialize(response_bytes)
 
             return detection
 
@@ -390,21 +390,22 @@ class DetectionServer:
                 self.request_count += 1
 
                 # Deserialize image message
-                image_msg = ImageSerializer.deserialize(message_bytes)
+                image_msg = InputSerial.deserialize(message_bytes)
 
                 # Process detection (call user's detection function)
                 detection_msg = detection_callback(image_msg)
 
                 # Serialize and send response
-                response_bytes = DetectionSerializer.serialize(detection_msg)
+                response_bytes = OutputSerial.serialize(detection_msg)
                 self.socket.send(response_bytes)
 
-                # Print periodic status
+                # Print periodic status (refreshing)
                 if self.request_count % 30 == 0:
-                    print(f"Processed {self.request_count} frames | "
+                    print(f"\rProcessed {self.request_count} frames | "
                           f"Last: {detection_msg.processing_time_ms:.1f}ms | "
                           f"Lanes: {'L' if detection_msg.left_lane else '-'}"
-                          f"{'R' if detection_msg.right_lane else '-'}")
+                          f"{'R' if detection_msg.right_lane else '-'}",
+                          end="", flush=True)
 
         except KeyboardInterrupt:
             print("\n\nStopping server...")

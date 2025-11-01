@@ -1,37 +1,25 @@
 #!/usr/bin/env python3
 """
-Distributed Lane Keeping System - CARLA Client (Enhanced Visualization)
+Distributed Lane Keeping System - CARLA Client
 
-NEW FEATURES:
+Features:
 - Multiple visualization backends (OpenCV, Pygame, Web)
 - Auto-detection of best viewer for environment
 - Web viewer for remote/Docker (no X11 needed!)
 - Better support for XQuartz and remote development
 
 Usage:
-    # Auto-select best viewer
-    python main.py --detector-url tcp://localhost:5555
+    simulation --viewer web
 
-    # Force specific viewer
-    python main.py --viewer opencv --detector-url tcp://localhost:5555
-    python main.py --viewer pygame --detector-url tcp://localhost:5555
-    python main.py --viewer web --detector-url tcp://localhost:5555
-
-    # Web viewer (best for remote/Docker!)
-    python main.py --viewer web --web-port 8080 --detector-url tcp://localhost:5555
-    # Then open: http://localhost:8080 in browser
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import cv2
 import time
 from collections import deque
-from typing import Optional
 from detection.core.config import ConfigManager
 from simulation.integration.visualization import (
     VisualizationManager,
@@ -71,10 +59,10 @@ class LatencyStats:
         self.total_latency = deque(maxlen=window_size)  # End-to-end latency
 
         # Timestamps for current frame
-        self.t_capture: Optional[float] = None
-        self.t_request_sent: Optional[float] = None
-        self.t_response_received: Optional[float] = None
-        self.t_control_applied: Optional[float] = None
+        self.t_capture: float | None = None
+        self.t_request_sent: float | None = None
+        self.t_response_received: float | None = None
+        self.t_control_applied: float | None = None
 
     def mark_capture(self):
         """Mark image capture timestamp."""
@@ -223,7 +211,12 @@ def main():
     )
 
     # System options
-    parser.add_argument("--config", type=str, default="config.yaml")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to configuration file (default: <project-root>/config.yaml)",
+    )
     parser.add_argument(
         "--host", type=str, default=None, help="CARLA server host (overrides config)"
     )
@@ -315,6 +308,8 @@ def main():
             height=config.camera.height,
             web_port=args.web_port,
         )
+    else:
+        viz = None
 
     # Initialize CARLA
     print("\n[1/5] Connecting to CARLA...")
@@ -335,7 +330,7 @@ def main():
     # carla_conn.set_all_traffic_lights_green()
 
     # World change (load specified town)
-    carla_conn.set_map("Town03")
+    # carla_conn.set_map("Town03")
 
     print("\n[3/5] Spawning vehicle...")
     vehicle_mgr = VehicleManager(carla_conn.get_world())
@@ -384,6 +379,45 @@ def main():
         vehicle_mgr.set_autopilot(True)
         print("\n✓ Autopilot enabled")
 
+    # Register web viewer actions
+    paused_state = {'is_paused': False}
+    if viz and viewer_type == 'web':
+        def handle_respawn() -> bool:
+            print("\n🔄 Respawn requested from web viewer")
+            try:
+                if vehicle_mgr.respawn_vehicle():
+                    print("✓ Vehicle respawned successfully")
+                else:
+                    print("✗ Failed to respawn vehicle")
+            except Exception as e:
+                print(f"✗ Respawn error: {e}")
+
+        def handle_pause() -> bool:
+            paused_state['is_paused'] = True
+            print("\n⏸ Paused from web viewer - simulation loop will freeze")
+
+        def handle_resume() -> bool:
+            paused_state['is_paused'] = False
+            print("\n▶️ Resumed from web viewer - simulation loop continues")
+
+        # Get the underlying web viewer from VisualizationManager
+        print(f"\n[DEBUG] viz object type: {type(viz)}")
+        print(f"[DEBUG] viz.viewer type: {type(viz.viewer)}")
+        print(f"[DEBUG] Has register_action? {hasattr(viz.viewer, 'register_action')}")
+
+        if hasattr(viz, 'viewer') and hasattr(viz.viewer, 'register_action'):
+            viz.viewer.register_action('respawn', handle_respawn)
+            viz.viewer.register_action('pause', handle_pause)
+            viz.viewer.register_action('resume', handle_resume)
+            print("\n✓ Web viewer controls registered successfully!")
+            print("  • Press 'R' or click 'Respawn' button to respawn vehicle")
+            print("  • Press 'Space' or click 'Pause' button to pause/resume simulation")
+        else:
+            print("\n⚠ Warning: Could not register web viewer actions")
+            print(f"  viz has viewer attr: {hasattr(viz, 'viewer')}")
+            if hasattr(viz, 'viewer'):
+                print(f"  viewer has register_action: {hasattr(viz.viewer, 'register_action')}")
+
     # Main loop
     print("\n" + "=" * 60)
     print("System Running")
@@ -421,6 +455,11 @@ def main():
 
     try:
         while True:
+            # Check if paused
+            if paused_state['is_paused']:
+                time.sleep(0.1)  # Small delay to reduce CPU usage while paused
+                continue
+
             # Tick the world (required in synchronous mode)
             if sync_mode:
                 carla_conn.get_world().tick()
@@ -525,7 +564,7 @@ def main():
                         )
 
             # Visualize
-            if not args.no_display:
+            if viz:
                 # Use debug image from detector if available, otherwise use raw image
                 if detection is not None and detection.debug_image is not None:
                     vis_image = detection.debug_image.copy()
@@ -628,7 +667,7 @@ def main():
                     )
                     status_line += f" | Latency: {total_latency:6.2f}ms"
 
-                print(status_line)
+                print(f"\r{status_line}", end="", flush=True)
                 last_print = time.time()
 
             # Print detailed latency report every 90 frames (after warmup)
@@ -643,7 +682,7 @@ def main():
         print("\n\nStopping...")
     finally:
         # Cleanup
-        if not args.no_display:
+        if viz:
             viz.close()
         detector.close()
         camera.destroy_camera()

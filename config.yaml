@@ -2,7 +2,7 @@
 
 # CARLA Settings
 carla:
-  host: "carla-server.local"
+  host: "ubuntu.local"
   port: 2000
   vehicle_type: "vehicle.tesla.model3"
 
@@ -56,8 +56,8 @@ lane_analyzer:
 # Throttle Control Policy
 # Adaptive throttle reduces speed during sharp turns to prevent overshooting
 throttle_policy:
-  base: 0.45              # Base throttle when steering is minimal
-  min: 0.18               # Minimum throttle during sharp turns
+  base: 0.15              # Base throttle when steering is minimal
+  min: 0.05              # Minimum throttle during sharp turns
   steer_threshold: 0.15   # Steering magnitude to start reducing throttle
   steer_max: 0.70         # Maximum expected steering magnitude
 

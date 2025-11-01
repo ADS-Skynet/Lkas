@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import cv2
-from typing import Tuple, Optional
+from typing import Tuple
 
 # Import pre-trained segmentation models
 try:
@@ -197,7 +197,7 @@ class DLLaneDetector:
     """Wrapper class for deep learning-based lane detection."""
 
     def __init__(self,
-                 model_path: Optional[str] = None,
+                 model_path: str | None = None,
                  model_type: str = 'pretrained',
                  device: str = 'auto',
                  input_size: Tuple[int, int] = (256, 256),
@@ -323,7 +323,7 @@ class DLLaneDetector:
 
         return resized_mask
 
-    def detect(self, image: np.ndarray) -> Tuple[Optional[Tuple], Optional[Tuple], np.ndarray]:
+    def detect(self, image: np.ndarray) -> Tuple[Tuple | None, Tuple | None, np.ndarray]:
         """
         Detect lanes in image.
 
@@ -354,7 +354,7 @@ class DLLaneDetector:
 
         return left_lane, right_lane, debug_image
 
-    def _extract_lane_lines(self, lane_mask: np.ndarray, image_shape: Tuple[int, int]) -> Tuple[Optional[Tuple], Optional[Tuple]]:
+    def _extract_lane_lines(self, lane_mask: np.ndarray, image_shape: Tuple[int, int]) -> Tuple[Tuple | None, Tuple | None]:
         """
         Extract left and right lane lines from segmentation mask.
 
@@ -384,7 +384,7 @@ class DLLaneDetector:
 
         return left_lane, right_lane
 
-    def _fit_lane_line(self, mask: np.ndarray, y_min: int, y_max: int, offset_x: int = 0) -> Optional[Tuple[int, int, int, int]]:
+    def _fit_lane_line(self, mask: np.ndarray, y_min: int, y_max: int, offset_x: int = 0) -> Tuple[int, int, int, int] | None:
         """
         Fit a lane line from a binary mask.
 
@@ -431,8 +431,8 @@ class DLLaneDetector:
             return None
 
     def _create_debug_image(self, image: np.ndarray, lane_mask: np.ndarray,
-                           left_lane: Optional[Tuple] = None,
-                           right_lane: Optional[Tuple] = None) -> np.ndarray:
+                           left_lane: Tuple | None = None,
+                           right_lane: Tuple | None = None) -> np.ndarray:
         """
         Create debug visualization.
 

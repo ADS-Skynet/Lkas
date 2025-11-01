@@ -10,11 +10,6 @@ For C++ developers:
     Formula: output = Kp * error + Kd * derivative(error)
 """
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from typing import Optional
 from detection.core.models import LaneMetrics, Lane
 
 
@@ -51,9 +46,9 @@ class PDController:
         self.kd = kd  # Derivative gain
 
         # State tracking for derivative term
-        self.prev_error: Optional[float] = None
+        self.prev_error: float | None = None
 
-    def compute_steering(self, metrics: LaneMetrics) -> Optional[float]:
+    def compute_steering(self, metrics: LaneMetrics) -> float | None:
         """
         Compute steering correction from lane metrics.
 
@@ -110,9 +105,9 @@ class PDController:
 
         return steering
 
-    def compute_steering_simple(self, left_lane: Optional[Lane],
-                                right_lane: Optional[Lane],
-                                image_width: int) -> Optional[float]:
+    def compute_steering_simple(self, left_lane: Lane | None,
+                                right_lane: Lane | None,
+                                image_width: int) -> float | None:
         """
         Simplified steering computation directly from lane lines.
 

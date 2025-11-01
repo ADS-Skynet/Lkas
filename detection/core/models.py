@@ -4,7 +4,7 @@ Uses dataclasses for type safety and clean data structures.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Tuple
 from enum import Enum
 import numpy as np
 
@@ -69,15 +69,15 @@ class LaneMetrics:
     All measurements and derived values for lane keeping assist.
     """
     # Raw measurements
-    vehicle_center_x: Optional[float] = None
-    lane_center_x: Optional[float] = None
-    lane_width_pixels: Optional[float] = None
+    vehicle_center_x: float | None = None
+    lane_center_x: float | None = None
+    lane_width_pixels: float | None = None
 
     # Calculated metrics
-    lateral_offset_pixels: Optional[float] = None
-    lateral_offset_meters: Optional[float] = None
-    lateral_offset_normalized: Optional[float] = None
-    heading_angle_deg: Optional[float] = None
+    lateral_offset_pixels: float | None = None
+    lateral_offset_meters: float | None = None
+    lateral_offset_normalized: float | None = None
+    heading_angle_deg: float | None = None
 
     # Status
     departure_status: LaneDepartureStatus = LaneDepartureStatus.UNKNOWN
@@ -114,14 +114,14 @@ class VehicleTelemetry:
     gear: int = 0
 
     # Position (optional)
-    location_x: Optional[float] = None
-    location_y: Optional[float] = None
-    location_z: Optional[float] = None
+    location_x: float | None = None
+    location_y: float | None = None
+    location_z: float | None = None
 
     # Rotation (optional)
-    pitch: Optional[float] = None
-    yaw: Optional[float] = None
-    roll: Optional[float] = None
+    pitch: float | None = None
+    yaw: float | None = None
+    roll: float | None = None
 
 
 @dataclass
@@ -131,9 +131,9 @@ class DetectionResult:
 
     Combines detected lanes with debug visualization.
     """
-    left_lane: Optional[Lane] = None
-    right_lane: Optional[Lane] = None
-    debug_image: Optional[np.ndarray] = None
+    left_lane: Lane | None = None
+    right_lane: Lane | None = None
+    debug_image: np.ndarray | None = None
     processing_time_ms: float = 0.0
 
     @property

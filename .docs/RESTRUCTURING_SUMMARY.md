@@ -181,7 +181,7 @@ All imports verified:
 # Main entry points
 ✓ from lane_detection.main_modular import main
 ✓ from lane_detection.main_distributed_v2 import main
-✓ from lane_detection.detection_server import StandaloneDetectionServer
+✓ from lane_detection.detection_server import DetectionService
 ```
 
 ## Documentation Updated

@@ -8,12 +8,8 @@ For C++ developers:
     Similar to: FrameProcessor::process() calling multiple methods in sequence.
 """
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple
 
 from detection.core.interfaces import LaneDetector
 from detection.core.models import DetectionResult, LaneMetrics
@@ -59,7 +55,7 @@ class FrameProcessor:
         self.frame_count = 0
         self.total_detection_time = 0.0
 
-    def process(self, image: np.ndarray) -> Tuple[np.ndarray, LaneMetrics, Optional[float]]:
+    def process(self, image: np.ndarray) -> Tuple[np.ndarray, LaneMetrics, float | None]:
         """
         Process a single frame through the pipeline.
 

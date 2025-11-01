@@ -5,13 +5,8 @@ Provides visualization utilities for lane detection and LKAS feedback.
 
 import cv2
 import numpy as np
-from typing import Optional, Tuple, Dict, Union
+from typing import Tuple, Dict
 from .lane_analyzer import LaneDepartureStatus
-
-# Import Lane model
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from detection.core.models import Lane
 
 
@@ -40,8 +35,8 @@ class LKASVisualizer:
     def draw_lanes(
         self,
         image: np.ndarray,
-        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
-        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        left_lane: Lane | Tuple[int, int, int, int] | None,
+        right_lane: Lane | Tuple[int, int, int, int] | None,
         fill_lane: bool = True,
     ) -> np.ndarray:
         """
@@ -112,7 +107,7 @@ class LKASVisualizer:
         self,
         image: np.ndarray,
         vehicle_center_x: int,
-        lane_center_x: Optional[float],
+        lane_center_x: float | None,
         departure_status: LaneDepartureStatus,
     ) -> np.ndarray:
         """
@@ -168,8 +163,8 @@ class LKASVisualizer:
         image: np.ndarray,
         metrics: Dict,
         show_steering: bool = True,
-        steering_value: Optional[float] = None,
-        vehicle_telemetry: Optional[Dict] = None,
+        steering_value: float | None = None,
+        vehicle_telemetry: Dict | None = None,
     ) -> np.ndarray:
         """
         Draw heads-up display with metrics.
@@ -461,7 +456,7 @@ class LKASVisualizer:
         original_image: np.ndarray,
         processed_image: np.ndarray,
         metrics: Dict,
-        steering_value: Optional[float] = None,
+        steering_value: float | None = None,
     ) -> np.ndarray:
         """
         Create combined view with original and processed images side by side.

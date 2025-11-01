@@ -5,12 +5,6 @@ Main controller that receives detection results and generates control commands.
 Combines lane analysis with PD control logic.
 """
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from typing import Optional
 from simulation.integration.messages import (
     DetectionMessage,
     ControlMessage,
@@ -38,7 +32,7 @@ class DecisionController:
         image_height: int,
         kp: float = 0.5,
         kd: float = 0.1,
-        throttle_policy: Optional[dict] = None,
+        throttle_policy: dict | None = None,
     ):
         """
         Initialize decision controller.
@@ -62,8 +56,8 @@ class DecisionController:
 
         # Adaptive throttle policy
         self.throttle_policy = throttle_policy or {
-            "base": 0.45,
-            "min": 0.18,
+            "base": 0.15,
+            "min": 0.05,
             "steer_threshold": 0.15,
             "steer_max": 0.70,
         }

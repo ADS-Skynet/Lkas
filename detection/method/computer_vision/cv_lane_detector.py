@@ -17,17 +17,11 @@ KEY PYTHON CLASS KEYWORDS EXPLAINED:
 import cv2
 import numpy as np
 import time
-from typing import Tuple, List, Optional
+from typing import Tuple, List
 
-# Import our new OOP components
-import sys
-from pathlib import Path
-# Add parent directory to path to import core
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from core.interfaces import LaneDetector  # ABC = Abstract Base Class
-from core.models import Lane, DetectionResult  # Type-safe data models
-from core.config import CVDetectorConfig  # Configuration
+from detection.core.interfaces import LaneDetector  # ABC = Abstract Base Class
+from detection.core.models import Lane, DetectionResult  # Type-safe data models
+from detection.core.config import CVDetectorConfig  # Configuration
 
 
 class CVLaneDetector(LaneDetector):
@@ -40,7 +34,7 @@ class CVLaneDetector(LaneDetector):
     """
 
     def __init__(self,
-                 roi_vertices: Optional[List[Tuple[int, int]]] = None,
+                 roi_vertices: List[Tuple[int, int]] | None = None,
                  canny_low: int = 50,
                  canny_high: int = 150,
                  hough_rho: int = 2,
@@ -49,7 +43,7 @@ class CVLaneDetector(LaneDetector):
                  hough_min_line_len: int = 40,
                  hough_max_line_gap: int = 100,
                  smoothing_factor: float = 0.7,
-                 config: Optional[CVDetectorConfig] = None):
+                 config: CVDetectorConfig | None = None):
         """
         Constructor (initializer).
 
@@ -93,8 +87,8 @@ class CVLaneDetector(LaneDetector):
         self.smoothing_factor = smoothing_factor
 
         # Lane tracking state
-        self.prev_left_lane: Optional[Lane] = None  # Type hint: Optional[Lane]
-        self.prev_right_lane: Optional[Lane] = None
+        self.prev_left_lane: Lane | None = None  # Type hint: Lane | None
+        self.prev_right_lane: Lane | None = None
         self.frame_count = 0  # Track number of detections for adaptive smoothing
 
     # =========================================================================
@@ -243,7 +237,7 @@ class CVLaneDetector(LaneDetector):
         """Detect edges using Canny."""
         return cv2.Canny(image, self.canny_low, self.canny_high)
 
-    def _detect_lines(self, edge_image: np.ndarray) -> Optional[np.ndarray]:
+    def _detect_lines(self, edge_image: np.ndarray) -> np.ndarray | None:
         """Detect lines using Hough transform."""
         lines = cv2.HoughLinesP(
             edge_image,
@@ -285,7 +279,7 @@ class CVLaneDetector(LaneDetector):
 
         return left_lines, right_lines
 
-    def _average_lane_lines(self, lines: List, y_min: int, y_max: int) -> Optional[Tuple[int, int, int, int]]:
+    def _average_lane_lines(self, lines: List, y_min: int, y_max: int) -> Tuple[int, int, int, int] | None:
         """Average multiple line segments into a single lane line."""
         if not lines:
             return None
@@ -311,8 +305,8 @@ class CVLaneDetector(LaneDetector):
 
         return (x1, y_max, x2, y_min)
 
-    def _smooth_lane(self, current_lane: Optional[Lane],
-                     previous_lane: Optional[Lane]) -> Optional[Lane]:
+    def _smooth_lane(self, current_lane: Lane | None,
+                     previous_lane: Lane | None) -> Lane | None:
         """
         Smooth lane detection using exponential moving average.
 
@@ -333,8 +327,8 @@ class CVLaneDetector(LaneDetector):
         # Create new Lane object with smoothed coordinates
         return Lane(x1=x1, y1=y1, x2=x2, y2=y2, confidence=current_lane.confidence)
 
-    def _smooth_lane_adaptive(self, current_lane: Optional[Lane],
-                              previous_lane: Optional[Lane]) -> Optional[Lane]:
+    def _smooth_lane_adaptive(self, current_lane: Lane | None,
+                              previous_lane: Lane | None) -> Lane | None:
         """
         Adaptive temporal smoothing that reduces smoothing during startup.
 
@@ -376,8 +370,8 @@ class CVLaneDetector(LaneDetector):
         return Lane(x1=x1, y1=y1, x2=x2, y2=y2, confidence=current_lane.confidence)
 
     def _create_debug_image(self, image: np.ndarray,
-                           left_lane: Optional[Lane],
-                           right_lane: Optional[Lane],
+                           left_lane: Lane | None,
+                           right_lane: Lane | None,
                            roi_vertices: np.ndarray) -> np.ndarray:
         """
         Create debug visualization image.

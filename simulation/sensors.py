@@ -7,7 +7,7 @@ Handles camera sensor setup and image capture in CARLA.
 import carla
 import numpy as np
 import weakref
-from typing import Optional, Callable
+from typing import Callable
 import queue
 
 
@@ -28,7 +28,7 @@ class CameraSensor:
         """
         self.world = world
         self.vehicle = vehicle
-        self.camera: Optional[carla.Sensor] = None
+        self.camera: carla.Sensor | None = None
         self.image_queue = queue.Queue()
 
         # Camera configuration
@@ -37,7 +37,7 @@ class CameraSensor:
         self.fov: float = 90.0
 
         # Latest image
-        self.latest_image: Optional[np.ndarray] = None
+        self.latest_image: np.ndarray | None = None
         self.frame_count: int = 0
 
     def setup_camera(self,
@@ -127,7 +127,7 @@ class CameraSensor:
         except queue.Full:
             pass
 
-    def get_latest_image(self) -> Optional[np.ndarray]:
+    def get_latest_image(self) -> np.ndarray | None:
         """
         Get the latest camera image.
 

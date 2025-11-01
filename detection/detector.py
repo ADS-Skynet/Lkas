@@ -4,21 +4,15 @@ Lane Detection Module
 Standalone detector that processes images and returns lane detection results.
 """
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 import numpy as np
 import time
-from typing import Optional
 
 from simulation.integration.messages import ImageMessage, DetectionMessage, LaneMessage
 from detection.core.factory import DetectorFactory
 from detection.core.config import Config
 
 
-class LaneDetectionModule:
+class LaneDetection:
     """
     Standalone lane detection module.
 

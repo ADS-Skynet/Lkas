@@ -4,9 +4,31 @@ Loads from YAML and provides type-safe access to settings.
 """
 
 from dataclasses import dataclass, field
-from typing import Tuple, Optional
+from typing import Tuple
 import yaml
 from pathlib import Path
+
+
+def get_project_root() -> Path:
+    """
+    Find the project root directory by locating pyproject.toml.
+
+    Returns:
+        Path to project root directory
+    """
+    # Start from this file's location and walk up to find pyproject.toml
+    current = Path(__file__).resolve()
+    for parent in [current] + list(current.parents):
+        if (parent / "pyproject.toml").exists():
+            return parent
+
+    # Fallback: assume project root is 2 levels up from this file
+    # (detection/core/config.py -> project root)
+    return Path(__file__).resolve().parent.parent.parent
+
+
+# Default config path at project root
+DEFAULT_CONFIG_PATH = get_project_root() / "config.yaml"
 
 
 @dataclass
@@ -77,8 +99,8 @@ class ControllerConfig:
 @dataclass
 class ThrottlePolicyConfig:
     """Adaptive throttle policy configuration."""
-    base: float = 0.45              # Base throttle when steering is minimal
-    min: float = 0.18               # Minimum throttle during sharp turns
+    base: float = 0.14              # Base throttle when steering is minimal
+    min: float = 0.05               # Minimum throttle during sharp turns
     steer_threshold: float = 0.15   # Steering magnitude to start reducing throttle
     steer_max: float = 0.70         # Maximum expected steering magnitude
 
@@ -129,23 +151,38 @@ class ConfigManager:
     Configuration manager with YAML loading.
 
     Usage:
-        config = ConfigManager.load('config.yaml')
+        # Load from project root config.yaml (default)
+        config = ConfigManager.load()
+
+        # Load from specific path
+        config = ConfigManager.load('path/to/config.yaml')
+
+        # Use built-in defaults only
+        config = ConfigManager.load('default')
+
         host = config.carla.host
     """
 
     @staticmethod
-    def load(config_path: Optional[str] = None) -> Config:
+    def load(config_path: str | Path | None = None) -> Config:
         """
         Load configuration from YAML file.
 
         Args:
-            config_path: Path to YAML config file. If None, uses defaults.
+            config_path: Path to YAML config file.
+                        If None, tries to load from project root config.yaml.
+                        If "default", uses built-in defaults without loading file.
 
         Returns:
             Config object with loaded settings
         """
-        if config_path is None:
+        # If explicitly asked for defaults, return without loading
+        if config_path == "default":
             return Config()
+
+        # If no path given, use project root config.yaml
+        if config_path is None:
+            config_path = DEFAULT_CONFIG_PATH
 
         path = Path(config_path)
         if not path.exists():

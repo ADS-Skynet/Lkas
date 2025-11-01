@@ -6,7 +6,6 @@ SINGLE RESPONSIBILITY: Handle video file creation and frame writing.
 
 import cv2
 import numpy as np
-from typing import Optional
 from pathlib import Path
 
 
@@ -17,7 +16,7 @@ class VideoRecorder:
     WRAPPER CLASS: Wraps OpenCV VideoWriter with cleaner interface
     """
 
-    def __init__(self, output_path: Optional[str] = None,
+    def __init__(self, output_path: str | None = None,
                  fps: float = 30.0,
                  fourcc: str = 'mp4v'):
         """
@@ -29,13 +28,13 @@ class VideoRecorder:
             fourcc: Video codec ('mp4v', 'XVID', 'MJPG', etc.)
 
         PYTHON KEYWORDS:
-            Optional[str]: Can be string or None
+            str | None: Can be string or None
             fourcc: Four Character Code for video codec
         """
         self.output_path = output_path
         self.fps = fps
         self.fourcc_str = fourcc
-        self.writer: Optional[cv2.VideoWriter] = None
+        self.writer: cv2.VideoWriter | None = None
         self.is_recording = False
 
     def start(self, width: int, height: int):

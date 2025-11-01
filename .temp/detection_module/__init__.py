@@ -5,6 +5,6 @@ Standalone lane detection module that processes images and returns lane informat
 Wraps existing CV and DL detection methods.
 """
 
-from .detector import LaneDetectionModule
+from ..detector import LaneDetection
 
-__all__ = ['LaneDetectionModule']
+__all__ = ['LaneDetection']

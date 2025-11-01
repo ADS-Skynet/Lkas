@@ -11,9 +11,8 @@ Perfect for remote development, Docker, or headless servers:
 import numpy as np
 import cv2
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 import base64
-from typing import Optional
 import time
 
 
@@ -35,14 +34,28 @@ class WebViewer:
         """
         self.port = port
         self.quiet = quiet
-        self.latest_image: Optional[np.ndarray] = None
-        self.server: Optional[HTTPServer] = None
-        self.server_thread: Optional[threading.Thread] = None
+        self.latest_image: np.ndarray | None = None
+        self.server: HTTPServer | None = None
+        self.server_thread: threading.Thread | None = None
         self.running = False
 
         # Statistics
         self.frame_count = 0
         self.last_update = time.time()
+
+        # Action callbacks
+        self.action_callbacks = {}
+        self.paused = False
+
+    def register_action(self, action_name: str, callback):
+        """
+        Register an action callback.
+
+        Args:
+            action_name: Name of the action (e.g., 'respawn', 'pause')
+            callback: Function to call when action is triggered
+        """
+        self.action_callbacks[action_name] = callback
 
     def start(self):
         """Start the web server."""
@@ -51,10 +64,62 @@ class WebViewer:
 
         class ViewerRequestHandler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
-                # Suppress HTTP logs (comment out to debug)
-                # Uncomment the line below to see all HTTP requests:
-                # print(f"[HTTP] {format % args}")
-                pass
+                # Enable HTTP logs for debugging
+                print(f"[HTTP] {format % args}")
+
+            def do_POST(self):
+                """Handle POST requests for actions."""
+                print(f"\n[WebViewer] ===== POST REQUEST RECEIVED =====")
+                print(f"[WebViewer] Path: {self.path}")
+                if self.path == '/action':
+                    # Read request body
+                    content_length = int(self.headers['Content-Length'])
+                    post_data = self.rfile.read(content_length)
+
+                    try:
+                        import json
+                        data = json.loads(post_data.decode('utf-8'))
+                        action = data.get('action')
+                        print(f"[WebViewer] Action requested: '{action}'")
+                        print(f"[WebViewer] Registered actions: {list(viewer_self.action_callbacks.keys())}")
+
+                        if action in viewer_self.action_callbacks:
+                            print(f"[WebViewer] Executing action: '{action}'")
+                            # Execute callback
+                            if viewer_self.action_callbacks[action]():
+                                print(f"[WebViewer] Action '{action}' completed")
+
+                                # Send success response
+                                self.send_response(200)
+                                self.send_header('Content-Type', 'application/json')
+                                self.end_headers()
+                                response = json.dumps({'status': 'ok', 'action': action})
+                                self.wfile.write(response.encode())
+                            else:
+                                print(f"[WebViewer] Action '{action}' has failed")
+                                self.send_error(500)
+                                self.end_headers()
+                                response = json.dumps({'status': 'Internal Server Error', 'action': action})
+                                self.wfile.write(response.encode())
+                        else:
+                            # Unknown action
+                            print(f"[WebViewer] ERROR: Unknown action '{action}'")
+                            self.send_response(400)
+                            self.send_header('Content-Type', 'application/json')
+                            self.end_headers()
+                            response = json.dumps({'status': 'error', 'message': f'Unknown action: {action}'})
+                            self.wfile.write(response.encode())
+                    except Exception as e:
+                        print(f"[WebViewer] ERROR processing action: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        self.send_response(500)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        response = json.dumps({'status': 'error', 'message': str(e)})
+                        self.wfile.write(response.encode())
+                else:
+                    self.send_error(404)
 
             def do_GET(self):
                 # Debug: Log first few requests
@@ -153,6 +218,43 @@ class WebViewer:
                             height: auto;
                             display: block;
                         }}
+                        .controls {{
+                            margin-top: 20px;
+                            padding: 15px;
+                            background: #2d2d2d;
+                            border-radius: 8px;
+                            display: flex;
+                            gap: 10px;
+                            flex-wrap: wrap;
+                        }}
+                        .btn {{
+                            padding: 10px 20px;
+                            background: #4a4a4a;
+                            border: none;
+                            border-radius: 4px;
+                            color: #fff;
+                            cursor: pointer;
+                            font-size: 14px;
+                            transition: background 0.2s;
+                        }}
+                        .btn:hover {{
+                            background: #5a5a5a;
+                        }}
+                        .btn:active {{
+                            background: #3a3a3a;
+                        }}
+                        .btn.primary {{
+                            background: #2196F3;
+                        }}
+                        .btn.primary:hover {{
+                            background: #1976D2;
+                        }}
+                        .btn.warning {{
+                            background: #FF9800;
+                        }}
+                        .btn.warning:hover {{
+                            background: #F57C00;
+                        }}
                         .info {{
                             margin-top: 20px;
                             padding: 15px;
@@ -172,6 +274,9 @@ class WebViewer:
                             margin-right: 8px;
                             animation: pulse 2s infinite;
                         }}
+                        .status.paused {{
+                            background: #FF9800;
+                        }}
                         @keyframes pulse {{
                             0%, 100% {{ opacity: 1; }}
                             50% {{ opacity: 0.5; }}
@@ -179,6 +284,32 @@ class WebViewer:
                         .key {{
                             color: #888;
                             margin-right: 10px;
+                        }}
+                        .kbd {{
+                            background: #3a3a3a;
+                            padding: 2px 6px;
+                            border-radius: 3px;
+                            font-family: monospace;
+                            font-size: 12px;
+                        }}
+                        .notification {{
+                            position: fixed;
+                            top: 20px;
+                            right: 20px;
+                            background: #4CAF50;
+                            color: white;
+                            padding: 15px 20px;
+                            border-radius: 4px;
+                            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                            opacity: 0;
+                            transition: opacity 0.3s;
+                            z-index: 1000;
+                        }}
+                        .notification.show {{
+                            opacity: 1;
+                        }}
+                        .notification.error {{
+                            background: #f44336;
                         }}
                     </style>
                 </head>
@@ -188,28 +319,110 @@ class WebViewer:
                         <div class="video-container">
                             <img src="/stream" alt="Lane Detection Stream">
                         </div>
+                        <div class="controls">
+                            <button class="btn primary" onclick="sendAction('respawn')">🔄 Respawn Vehicle</button>
+                            <button class="btn warning" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
+                        </div>
                         <div class="info">
                             <div class="info-item">
-                                <span class="status"></span>
+                                <span class="status" id="statusDot"></span>
                                 <span class="key">Status:</span>
-                                <span>Streaming</span>
+                                <span id="statusText">Streaming</span>
                             </div>
                             <div class="info-item">
                                 <span class="key">Port:</span>
                                 <span>{viewer_self.port}</span>
                             </div>
                             <div class="info-item">
-                                <span class="key">Tip:</span>
-                                <span>Press Q in terminal to quit</span>
+                                <span class="key">Keyboard Shortcuts:</span>
+                                <span><kbd class="kbd">R</kbd> Respawn | <kbd class="kbd">Space</kbd> Pause/Resume | <kbd class="kbd">Q</kbd> Quit (in terminal)</span>
                             </div>
                         </div>
                     </div>
+
+                    <div class="notification" id="notification"></div>
+
+                    <script>
+                        let isPaused = false;
+
+                        function sendAction(action) {{
+                            fetch('/action', {{
+                                method: 'POST',
+                                headers: {{
+                                    'Content-Type': 'application/json',
+                                }},
+                                body: JSON.stringify({{ action: action }})
+                            }})
+                            .then(response => response.json())
+                            .then(data => {{
+                                if (data.status === 'ok') {{
+                                    showNotification('Action executed: ' + action);
+                                }} else {{
+                                    showNotification('Error: ' + data.message, true);
+                                }}
+                            }})
+                            .catch(error => {{
+                                showNotification('Network error: ' + error, true);
+                            }});
+                        }}
+
+                        function togglePause() {{
+                            isPaused = !isPaused;
+                            sendAction(isPaused ? 'pause' : 'resume');
+
+                            const btn = document.getElementById('pauseBtn');
+                            const statusDot = document.getElementById('statusDot');
+                            const statusText = document.getElementById('statusText');
+
+                            if (isPaused) {{
+                                btn.textContent = '▶️ Resume';
+                                btn.classList.add('primary');
+                                btn.classList.remove('warning');
+                                statusDot.classList.add('paused');
+                                statusText.textContent = 'Paused';
+                            }} else {{
+                                btn.textContent = '⏸ Pause';
+                                btn.classList.remove('primary');
+                                btn.classList.add('warning');
+                                statusDot.classList.remove('paused');
+                                statusText.textContent = 'Streaming';
+                            }}
+                        }}
+
+                        function showNotification(message, isError = false) {{
+                            const notif = document.getElementById('notification');
+                            notif.textContent = message;
+                            notif.className = 'notification show' + (isError ? ' error' : '');
+
+                            setTimeout(() => {{
+                                notif.classList.remove('show');
+                            }}, 3000);
+                        }}
+
+                        // Keyboard shortcuts
+                        document.addEventListener('keydown', function(event) {{
+                            // Prevent default for our shortcuts
+                            if (event.key === 'r' || event.key === 'R' || event.key === ' ') {{
+                                event.preventDefault();
+                            }}
+
+                            if (event.key === 'r' || event.key === 'R') {{
+                                sendAction('respawn');
+                            }} else if (event.key === ' ') {{
+                                togglePause();
+                            }}
+                        }});
+
+                        // Focus on body to ensure keyboard events are captured
+                        document.body.focus();
+                    </script>
                 </body>
                 </html>
                 """
 
         # Start server in separate thread
-        self.server = HTTPServer(('', self.port), ViewerRequestHandler)
+        # Use ThreadingHTTPServer to handle multiple connections (stream + POST requests)
+        self.server = ThreadingHTTPServer(('', self.port), ViewerRequestHandler)
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.running = True
         self.server_thread.start()

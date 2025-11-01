@@ -12,11 +12,6 @@ Architecture:
     - Fast control loop              - Can be on different machine
 """
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 import time
 from typing import Optional
 import cv2
@@ -75,11 +70,11 @@ class DistributedOrchestrator:
         self._frame_times = []
 
         # Module instances
-        self.carla_connection: Optional[CARLAConnection] = None
-        self.vehicle_manager: Optional[VehicleManager] = None
-        self.camera_sensor: Optional[CameraSensor] = None
-        self.detection_client: Optional[DetectionClient] = None  # Remote!
-        self.decision_controller: Optional[DecisionController] = None
+        self.carla_connection: CARLAConnection | None = None
+        self.vehicle_manager: VehicleManager | None = None
+        self.camera_sensor: CameraSensor | None = None
+        self.detection_client: DetectionClient | None = None  # Remote!
+        self.decision_controller: DecisionController | None = None
 
         # Network statistics
         self.network_timeouts = 0
@@ -89,7 +84,7 @@ class DistributedOrchestrator:
         self,
         carla_host: str = "localhost",
         carla_port: int = 2000,
-        spawn_point: Optional[int] = None,
+        spawn_point: int | None = None,
         detector_timeout_ms: int = 1000,
     ) -> bool:
         """
@@ -345,7 +340,7 @@ class DistributedOrchestrator:
         self._last_time = current_time
 
     def _print_status(
-        self, detection: Optional[DetectionMessage], control: ControlMessage
+        self, detection: DetectionMessage | None, control: ControlMessage
     ):
         """Print periodic status update."""
         lanes_str = (

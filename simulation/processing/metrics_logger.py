@@ -4,12 +4,7 @@ Metrics Logger - Tracks and logs performance metrics.
 SINGLE RESPONSIBILITY: Log performance data and provide statistics.
 """
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import time
-from typing import Optional
 from detection.core.models import LaneMetrics
 
 
@@ -74,7 +69,7 @@ class MetricsLogger:
             return 0.0
         return (self.successful_detections / self.total_frames) * 100.0
 
-    def print_metrics(self, metrics: LaneMetrics, steering: Optional[float]):
+    def print_metrics(self, metrics: LaneMetrics, steering: float | None):
         """
         Print metrics to console.
 

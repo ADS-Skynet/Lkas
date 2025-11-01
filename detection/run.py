@@ -10,16 +10,10 @@ This is a separate process that:
 
 Usage:
     # Start server with Computer Vision detector
-    python detection_server.py --method cv --port 5555
+    lane-detection --method cv --port 5556
 
     # Start server with Deep Learning detector on GPU
-    python detection_server.py --method dl --port 5555 --gpu 0
-
-Benefits:
-    - Runs independently from CARLA client
-    - Can be on different machine (e.g., GPU server)
-    - Can be restarted without affecting vehicle control
-    - Multiple clients can connect to same server
+    lane-detection --method dl --port 5555 --gpu 0
 """
 
 import argparse
@@ -27,22 +21,20 @@ import sys
 import signal
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from detection.core.config import ConfigManager
-from detection.detection_module import LaneDetectionModule
-from simulation.integration.communication import DetectionServer
+from detection import LaneDetection
+from simulation.integration.communication import DetectionServer as ZmqDetectionServer
 from simulation.integration.messages import ImageMessage, DetectionMessage
 
 
-class StandaloneDetectionServer:
+class DetectionService:
     """
-    Standalone detection server that wraps detection module.
+    Standalone server that wraps detection module.
     """
 
     def __init__(self, config, detection_method: str, bind_url: str):
         """
-        Initialize standalone detection server.
+        Initialize detection server.
 
         Args:
             config: System configuration
@@ -55,13 +47,13 @@ class StandaloneDetectionServer:
 
         # Initialize detection module
         print(f"\nInitializing {detection_method.upper()} detector...")
-        self.detection_module = LaneDetectionModule(config, detection_method)
+        self.detection_module = LaneDetection(config, detection_method)
         print(f"✓ Detector ready: {self.detection_module.get_detector_name()}")
         print(f"  Parameters: {self.detection_module.get_detector_params()}")
 
         # Create ZMQ server
         print()
-        self.server = DetectionServer(bind_url)
+        self.server = ZmqDetectionServer(bind_url)
 
         print("\n" + "=" * 60)
         print("Server initialized successfully!")
@@ -110,7 +102,10 @@ def main():
         help="Lane detection method (cv=Computer Vision, dl=Deep Learning)",
     )
     parser.add_argument(
-        "--config", type=str, default="config.yaml", help="Path to configuration file"
+        "--config",
+        type=str,
+        default=None,
+        help="Path to configuration file (default: <project-root>/config.yaml)",
     )
     parser.add_argument("--port", type=int, default=5556, help="Port to listen on")
     parser.add_argument(
@@ -141,7 +136,7 @@ def main():
     bind_url = f"tcp://{args.host}:{args.port}"
 
     # Create and run server
-    server = StandaloneDetectionServer(config, args.method, bind_url)
+    server = DetectionService(config, args.method, bind_url)
     server.run()
 
     return 0

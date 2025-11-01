@@ -9,7 +9,6 @@ Better than OpenCV for remote environments:
 
 import pygame
 import numpy as np
-from typing import Optional
 
 
 class PygameViewer:

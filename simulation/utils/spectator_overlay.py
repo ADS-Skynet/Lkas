@@ -5,7 +5,7 @@ Provides overlay information on CARLA spectator view with vehicle tracking.
 
 import carla
 import numpy as np
-from typing import Optional, Tuple
+from typing import Tuple
 
 
 class SpectatorOverlay:

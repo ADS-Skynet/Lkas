@@ -31,7 +31,7 @@ class ImageMessage:
     image: np.ndarray
     timestamp: float
     frame_id: int
-    camera_transform: Optional[dict] = None
+    camera_transform: dict | None = None
 
     @property
     def height(self) -> int:
@@ -83,12 +83,12 @@ class DetectionMessage:
         frame_id: Corresponding frame ID
         timestamp: Detection timestamp
     """
-    left_lane: Optional[LaneMessage]
-    right_lane: Optional[LaneMessage]
+    left_lane: LaneMessage | None
+    right_lane: LaneMessage | None
     processing_time_ms: float
     frame_id: int
     timestamp: float
-    debug_image: Optional[np.ndarray] = None
+    debug_image: np.ndarray | None = None
 
     @property
     def has_both_lanes(self) -> bool:
@@ -131,8 +131,8 @@ class ControlMessage:
     mode: ControlMode = ControlMode.LANE_KEEPING
 
     # Diagnostic info (not used for control)
-    lateral_offset: Optional[float] = None
-    heading_angle: Optional[float] = None
+    lateral_offset: float | None = None
+    heading_angle: float | None = None
 
     def clamp_values(self):
         """Ensure all control values are within valid ranges."""

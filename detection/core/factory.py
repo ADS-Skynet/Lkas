@@ -4,7 +4,6 @@ Factory pattern for creating lane detectors.
 Centralizes detector instantiation and configuration.
 """
 
-from typing import Optional
 from .interfaces import LaneDetector
 from .config import Config
 
@@ -27,7 +26,7 @@ class DetectorFactory:
         """
         self.config = config
 
-    def create(self, detector_type: Optional[str] = None, **kwargs) -> LaneDetector:
+    def create(self, detector_type: str | None = None, **kwargs) -> LaneDetector:
         """
         Create a lane detector instance.
 
@@ -58,12 +57,7 @@ class DetectorFactory:
     def _create_cv_detector(self, **kwargs) -> LaneDetector:
         """Create Computer Vision detector."""
         # Import here to avoid circular dependencies
-        import sys
-        from pathlib import Path
-
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-
-        from method.computer_vision.cv_lane_detector import CVLaneDetector
+        from detection.method.computer_vision.cv_lane_detector import CVLaneDetector
 
         cfg = self.config.cv_detector
 
@@ -85,12 +79,7 @@ class DetectorFactory:
     def _create_dl_detector(self, **kwargs) -> LaneDetector:
         """Create Deep Learning detector."""
         # Import here to avoid circular dependencies
-        import sys
-        from pathlib import Path
-
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-
-        from method.deep_learning.lane_net import DLLaneDetector
+        from detection.method.deep_learning.lane_net import DLLaneDetector
 
         cfg = self.config.dl_detector
 

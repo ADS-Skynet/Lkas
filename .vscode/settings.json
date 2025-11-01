@@ -63,5 +63,6 @@
         "linspace"
     ],
     "cSpell.enabled": false,
-    "cSpell.language": "en"
+    "cSpell.language": "en",
+    "autoHide.autoHideAuxiliaryBar": true
 }

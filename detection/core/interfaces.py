@@ -5,7 +5,6 @@ Defines contracts that all implementations must follow.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
 import numpy as np
 
 from .models import Lane, DetectionResult
@@ -65,7 +64,7 @@ class SensorInterface(ABC):
         pass
 
     @abstractmethod
-    def get_latest_image(self) -> Optional[np.ndarray]:
+    def get_latest_image(self) -> np.ndarray | None:
         """
         Get the most recent image from sensor.
 

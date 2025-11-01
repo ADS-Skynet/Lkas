@@ -5,7 +5,6 @@ Handles connection to CARLA simulator and world access.
 """
 
 import carla
-from typing import Optional
 
 
 class CARLAConnection:
@@ -30,8 +29,8 @@ class CARLAConnection:
         self.port = port
         self.timeout = timeout
 
-        self.client: Optional[carla.Client] = None
-        self.world: Optional[carla.World] = None
+        self.client: carla.Client | None = None
+        self.world: carla.World | None = None
         self._connected = False
 
     def connect(self) -> bool:
@@ -67,7 +66,7 @@ class CARLAConnection:
         """Check if connected to CARLA."""
         return self._connected and self.world is not None
 
-    def get_world(self) -> Optional[carla.World]:
+    def get_world(self) -> carla.World | None:
         """
         Get CARLA world.
 
@@ -76,7 +75,7 @@ class CARLAConnection:
         """
         return self.world
 
-    def get_blueprint_library(self) -> Optional[carla.BlueprintLibrary]:
+    def get_blueprint_library(self) -> carla.BlueprintLibrary | None:
         """
         Get CARLA blueprint library.
 
@@ -87,7 +86,7 @@ class CARLAConnection:
             return None
         return self.world.get_blueprint_library()
 
-    def get_map(self) -> Optional[carla.Map]:
+    def get_map(self) -> carla.Map | None:
         """
         Get CARLA map.
 
@@ -120,7 +119,7 @@ class CARLAConnection:
         if self.world:
             self.world.set_weather(weather)
 
-    def get_settings(self) -> Optional[carla.WorldSettings]:
+    def get_settings(self) -> carla.WorldSettings | None:
         """Get world settings."""
         if self.world:
             return self.world.get_settings()

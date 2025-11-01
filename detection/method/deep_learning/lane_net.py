@@ -7,21 +7,16 @@ Wraps the existing base DL detector to implement the new interface.
 For beginners: This shows how to adapt existing code to new interfaces!
 """
 
-import sys
-from pathlib import Path
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 import time
 import numpy as np
-from typing import Optional, Tuple
+from typing import Tuple
 
-from core.interfaces import LaneDetector
-from core.models import Lane, DetectionResult
-from core.config import DLDetectorConfig
+from detection.core.interfaces import LaneDetector
+from detection.core.models import Lane, DetectionResult
+from detection.core.config import DLDetectorConfig
 
 # Import the base DL detector implementation
-from method.deep_learning.lane_net_base import DLLaneDetector as _BaseDLLaneDetector
+from detection.method.deep_learning.lane_net_base import DLLaneDetector as _BaseDLLaneDetector
 
 
 class DLLaneDetector(LaneDetector):
@@ -35,12 +30,12 @@ class DLLaneDetector(LaneDetector):
     """
 
     def __init__(self,
-                 model_path: Optional[str] = None,
+                 model_path: str | None = None,
                  model_type: str = 'pretrained',
                  device: str = 'auto',
                  input_size: Tuple[int, int] = (256, 256),
                  threshold: float = 0.5,
-                 config: Optional[DLDetectorConfig] = None):
+                 config: DLDetectorConfig | None = None):
         """
         Initialize DL detector.
 
