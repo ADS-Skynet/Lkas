@@ -529,15 +529,15 @@ def main():
                     # Override for testing
                     steering = control.steering
                     throttle = args.force_throttle
-                elif in_warmup:
-                    # During warmup: IGNORE unstable steering, go straight with base throttle
-                    steering = 0.0  # GO STRAIGHT - don't trust early detections!
-                    throttle = args.base_throttle
-                    if frame_count == args.warmup_frames - 1:
-                        warmup_complete = True
-                        print(
-                            f"\n✅ Warmup complete! Detections stabilized. Switching to full lane-keeping control.\n"
-                        )
+                # elif in_warmup:
+                #     # During warmup: IGNORE unstable steering, go straight with base throttle
+                #     steering = 0.0  # GO STRAIGHT - don't trust early detections!
+                #     throttle = args.base_throttle
+                #     if frame_count == args.warmup_frames - 1:
+                #         warmup_complete = True
+                #         print(
+                #             f"\n✅ Warmup complete! Detections stabilized. Switching to full lane-keeping control.\n"
+                #         )
                 else:
                     # After warmup: use full control (both steering and adaptive throttle)
                     steering = control.steering
@@ -549,19 +549,19 @@ def main():
                 if latency_tracker:
                     latency_tracker.mark_control_applied()
 
-                if frame_count < 5 or (
-                    in_warmup and frame_count % 10 == 0
-                ):  # Print during warmup
-                    mode = "WARMUP" if in_warmup else "ACTIVE"
-                    if in_warmup:
-                        print(
-                            f"[{mode}] Frame {frame_count:3d}: steering={steering:+.3f} (forced=0.0), "
-                            f"throttle={throttle:.3f}, detected_steering={control.steering:+.3f} (ignored)"
-                        )
-                    else:
-                        print(
-                            f"[{mode}] Frame {frame_count:3d}: steering={steering:+.3f}, throttle={throttle:.3f}, brake={control.brake:.3f}"
-                        )
+                # if frame_count < 5 or (
+                #     in_warmup and frame_count % 10 == 0
+                # ):  # Print during warmup
+                #     mode = "WARMUP" if in_warmup else "ACTIVE"
+                #     if in_warmup:
+                #         print(
+                #             f"[{mode}] Frame {frame_count:3d}: steering={steering:+.3f} (forced=0.0), "
+                #             f"throttle={throttle:.3f}, detected_steering={control.steering:+.3f} (ignored)"
+                #         )
+                #     else:
+                #         print(
+                #             f"[{mode}] Frame {frame_count:3d}: steering={steering:+.3f}, throttle={throttle:.3f}, brake={control.brake:.3f}"
+                #         )
 
             # Visualize
             if viz:

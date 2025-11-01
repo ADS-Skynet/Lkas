@@ -123,11 +123,11 @@ class WebViewer:
 
             def do_GET(self):
                 # Debug: Log first few requests
-                if not hasattr(viewer_self, '_request_count'):
-                    viewer_self._request_count = 0
-                viewer_self._request_count += 1
-                if viewer_self._request_count <= 10:
-                    print(f"[WebViewer] Request #{viewer_self._request_count}: {self.path}")
+                # if not hasattr(viewer_self, '_request_count'):
+                #     viewer_self._request_count = 0
+                # viewer_self._request_count += 1
+                # if viewer_self._request_count <= 10:
+                #     print(f"[WebViewer] Request #{viewer_self._request_count}: {self.path}")
                 if self.path == '/':
                     # Serve HTML page
                     self.send_response(200)
@@ -138,8 +138,9 @@ class WebViewer:
 
                 elif self.path == '/stream':
                     # Serve MJPEG stream
-                    if viewer_self._request_count <= 10:
-                        print("[WebViewer] Stream request received")
+                    # if viewer_self._request_count <= 10:
+                    print("[WebViewer] Stream request received")
+
                     self.send_response(200)
                     self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=--jpgboundary')
                     self.send_header('Cache-Control', 'no-cache, private')
@@ -164,8 +165,8 @@ class WebViewer:
                                     self.wfile.write(b'\r\n')
 
                                     frame_sent += 1
-                                    if frame_sent <= 3:
-                                        print(f"[WebViewer] Sent frame {frame_sent} ({len(frame_bytes)} bytes)")
+                                    # if frame_sent <= 3:
+                                    #     print(f"[WebViewer] Sent frame {frame_sent} ({len(frame_bytes)} bytes)")
 
                             time.sleep(0.033)  # ~30 FPS
                     except Exception as e:
@@ -449,9 +450,9 @@ class WebViewer:
             self.frame_count += 1
 
             # Debug: print first few frames
-            if self.frame_count <= 5:
-                print(f"[WebViewer] Received frame {self.frame_count}, shape: {image.shape}, dtype: {image.dtype}, "
-                      f"min: {image.min()}, max: {image.max()}")
+            # if self.frame_count <= 5:
+            #     print(f"[WebViewer] Received frame {self.frame_count}, shape: {image.shape}, dtype: {image.dtype}, "
+            #           f"min: {image.min()}, max: {image.max()}")
         else:
             print(f"[WebViewer] WARNING: Invalid image - shape: {image.shape if image is not None else 'None'}")
 
