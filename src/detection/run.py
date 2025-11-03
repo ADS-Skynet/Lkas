@@ -4,23 +4,19 @@ Standalone Lane Detection Server
 
 This is a separate process that:
 1. Loads a lane detection model (CV or DL)
-2. Listens for image requests via ZMQ OR Shared Memory
+2. Listens for image requests via Shared Memory
 3. Processes images and returns lane detections
-4. Can run on a different machine with GPU (ZMQ mode) or same machine (Shared Memory mode)
-
-Communication Modes:
-    - ZMQ (default): Network-capable, ~2ms latency, can run on different machines
-    - Shared Memory: Ultra-fast ~0.001ms latency, same machine only
+4. Ultra-low latency (~0.001ms) using shared memory IPC
 
 Usage:
-    # Start server with Computer Vision detector (ZMQ mode)
-    lane-detection --method cv --port 5556
+    # Start server with Computer Vision detector
+    lane-detection --method cv
 
-    # Start server with Deep Learning detector on GPU (ZMQ mode)
-    lane-detection --method dl --port 5555 --gpu 0
+    # Start server with Deep Learning detector on GPU
+    lane-detection --method dl --gpu 0
 
-    # Start server with Shared Memory mode (ultra-low latency)
-    lane-detection --method cv --shared-memory
+    # Custom shared memory names
+    lane-detection --method cv --image-shm-name my_camera --detection-shm-name my_results
 """
 
 import argparse
@@ -30,7 +26,6 @@ from pathlib import Path
 
 from detection.core.config import ConfigManager
 from detection import LaneDetection
-from simulation.integration.communication import DetectionServer as ZmqDetectionServer
 from simulation.integration.shared_memory_detection import SharedMemoryDetectionServer
 from simulation.integration.messages import ImageMessage, DetectionMessage
 
@@ -38,12 +33,10 @@ from simulation.integration.messages import ImageMessage, DetectionMessage
 class DetectionService:
     """
     Standalone server that wraps detection module.
-    Supports both ZMQ and Shared Memory communication modes.
+    Uses shared memory for ultra-low latency communication.
     """
 
     def __init__(self, config, detection_method: str,
-                 use_shared_memory: bool = False,
-                 bind_url: str = None,
                  image_shm_name: str = "camera_feed",
                  detection_shm_name: str = "detection_results"):
         """
@@ -52,16 +45,12 @@ class DetectionService:
         Args:
             config: System configuration
             detection_method: Detection method ('cv' or 'dl')
-            use_shared_memory: Use shared memory instead of ZMQ
-            bind_url: ZMQ URL to bind to (if not using shared memory)
-            image_shm_name: Shared memory name for images (if using shared memory)
-            detection_shm_name: Shared memory name for detections (if using shared memory)
+            image_shm_name: Shared memory name for images
+            detection_shm_name: Shared memory name for detections
         """
         print("\n" + "=" * 60)
         print("Lane Detection Server")
         print("=" * 60)
-
-        self.use_shared_memory = use_shared_memory
 
         # Initialize detection module
         print(f"\nInitializing {detection_method.upper()} detector...")
@@ -69,21 +58,16 @@ class DetectionService:
         print(f"✓ Detector ready: {self.detection_module.get_detector_name()}")
         print(f"  Parameters: {self.detection_module.get_detector_params()}")
 
-        # Create server based on mode
+        # Create shared memory server
         print()
-        if use_shared_memory:
-            print(f"Using SHARED MEMORY mode (ultra-low latency ~0.001ms)")
-            print(f"  Image input: {image_shm_name}")
-            print(f"  Detection output: {detection_shm_name}")
-            self.server = SharedMemoryDetectionServer(
-                image_shm_name=image_shm_name,
-                detection_shm_name=detection_shm_name,
-                image_shape=(config.camera.height, config.camera.width, 3)
-            )
-        else:
-            print(f"Using ZMQ mode (network-capable ~2ms latency)")
-            print(f"  Bind URL: {bind_url}")
-            self.server = ZmqDetectionServer(bind_url)
+        print(f"Using SHARED MEMORY mode (ultra-low latency)")
+        print(f"  Image input: {image_shm_name}")
+        print(f"  Detection output: {detection_shm_name}")
+        self.server = SharedMemoryDetectionServer(
+            image_shm_name=image_shm_name,
+            detection_shm_name=detection_shm_name,
+            image_shape=(config.camera.height, config.camera.width, 3)
+        )
 
         print("\n" + "=" * 60)
         print("Server initialized successfully!")
@@ -138,12 +122,7 @@ def main():
         help="Path to configuration file (default: <project-root>/config.yaml)",
     )
 
-    # Communication mode
-    parser.add_argument(
-        "--shared-memory",
-        action="store_true",
-        help="Use shared memory instead of ZMQ (ultra-low latency, same machine only)",
-    )
+    # Shared memory options
     parser.add_argument(
         "--image-shm-name",
         type=str,
@@ -155,15 +134,6 @@ def main():
         type=str,
         default="detection_results",
         help="Shared memory name for detection results (default: detection_results)",
-    )
-
-    # ZMQ mode options
-    parser.add_argument("--port", type=int, default=5556, help="Port to listen on (ZMQ mode)")
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="*",
-        help="Host to bind to (* for all interfaces, localhost for local only) (ZMQ mode)",
     )
 
     # GPU option
@@ -185,25 +155,13 @@ def main():
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
         print(f"✓ Using GPU {args.gpu}")
 
-    # Create and run server
-    if args.shared_memory:
-        # Shared memory mode
-        server = DetectionService(
-            config=config,
-            detection_method=args.method,
-            use_shared_memory=True,
-            image_shm_name=args.image_shm_name,
-            detection_shm_name=args.detection_shm_name
-        )
-    else:
-        # ZMQ mode
-        bind_url = f"tcp://{args.host}:{args.port}"
-        server = DetectionService(
-            config=config,
-            detection_method=args.method,
-            use_shared_memory=False,
-            bind_url=bind_url
-        )
+    # Create and run server (shared memory only)
+    server = DetectionService(
+        config=config,
+        detection_method=args.method,
+        image_shm_name=args.image_shm_name,
+        detection_shm_name=args.detection_shm_name
+    )
 
     server.run()
 

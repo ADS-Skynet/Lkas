@@ -90,9 +90,10 @@ lane-detection = "detection.run:main"
 simulation = "simulation.run:main"
 viewer = "viewer.run:main"
 
-# Package discovery
+# Package discovery (src-layout)
 [tool.setuptools]
-packages = ["detection", "simulation", "decision", "viewer", "utils"]
+package-dir = {"" = "src"}
+packages = ["detection", "simulation", "decision", "viewer"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.yml", "*.json"]
