@@ -34,6 +34,16 @@ from simulation.integration.messages import (
     ControlMessage,
     ControlMode,
 )
+from simulation.integration.zmq_broadcast import (
+    VehicleBroadcaster,
+    ActionSubscriber,
+    DetectionData,
+    VehicleState,
+)
+from simulation.integration.shared_memory_detection import (
+    SharedMemoryImageChannel,
+    SharedMemoryDetectionClient,
+)
 
 
 class LatencyStats:
@@ -225,7 +235,26 @@ def main():
     )
     parser.add_argument("--spawn-point", type=int, default=None)
 
-    # Detection server
+    # Detection communication mode
+    parser.add_argument(
+        "--shared-memory",
+        action="store_true",
+        help="Use shared memory for detection (ultra-low latency, same machine only)",
+    )
+    parser.add_argument(
+        "--image-shm-name",
+        type=str,
+        default="camera_feed",
+        help="Shared memory name for camera images (default: camera_feed)",
+    )
+    parser.add_argument(
+        "--detection-shm-name",
+        type=str,
+        default="detection_results",
+        help="Shared memory name for detection results (default: detection_results)",
+    )
+
+    # ZMQ detection server (used if not --shared-memory)
     parser.add_argument("--detector-url", type=str, default="tcp://localhost:5556")
     parser.add_argument("--detector-timeout", type=int, default=1000)
 
@@ -269,6 +298,25 @@ def main():
         help="Enable latency tracking and reporting (adds overhead)",
     )
 
+    # ZMQ Broadcasting options (NEW: For remote viewer)
+    parser.add_argument(
+        "--broadcast",
+        action="store_true",
+        help="ZMQ broadcast mode: 'none' (disabled), 'detection-only' (production, ~9 KB/s), 'with-images' (development, ~1.5 MB/s)",
+    )
+    parser.add_argument(
+        "--broadcast-url",
+        type=str,
+        default="tcp://*:5557",
+        help="ZMQ URL for broadcasting vehicle data (default: tcp://*:5557)",
+    )
+    parser.add_argument(
+        "--action-url",
+        type=str,
+        default="tcp://*:5558",
+        help="ZMQ URL for receiving actions (default: tcp://*:5558)",
+    )
+
     args = parser.parse_args()
 
     # Load configuration
@@ -284,7 +332,16 @@ def main():
     print("DISTRIBUTED LANE KEEPING SYSTEM - ENHANCED")
     print("=" * 60)
     print(f"CARLA Server: {carla_host}:{carla_port}")
-    print(f"Detection Server: {args.detector_url}")
+
+    # Detection mode
+    if args.shared_memory:
+        print(f"Detection Mode: SHARED MEMORY (ultra-low latency ~0.001ms)")
+        print(f"  Image output: {args.image_shm_name}")
+        print(f"  Detection input: {args.detection_shm_name}")
+    else:
+        print(f"Detection Mode: ZMQ (network-capable ~2ms)")
+        print(f"  Detection Server: {args.detector_url}")
+
     print(f"Camera: {config.camera.width}x{config.camera.height}")
 
     # Determine viewer type
@@ -297,7 +354,30 @@ def main():
         viewer_type = args.viewer
 
     print(f"Visualization: {viewer_type}")
+
+    # ZMQ Broadcasting (NEW: For production/remote viewer)
+    if args.broadcast != "none":
+        print(f"ZMQ Broadcasting: ENABLED")
+        print(f"  Broadcast URL: {args.broadcast_url}")
+        print(f"  Action URL: {args.action_url}")
+        # if args.broadcast == "with-images":
+        #     print(f"  Mode: DEVELOPMENT (with images, ~1.5 MB/s)")
+        # else:
+        #     print(f"  Mode: PRODUCTION (detection only, ~9 KB/s) ✅")
+    else:
+        print(f"ZMQ Broadcasting: DISABLED (use --broadcast detection-only or --broadcast with-images)")
+
     print("=" * 60)
+
+    # Initialize ZMQ broadcaster (if enabled)
+    broadcaster = None
+    action_subscriber = None
+
+    if args.broadcast:
+        print("\nInitializing ZMQ broadcaster for remote viewer...")
+        broadcaster = VehicleBroadcaster(bind_url=args.broadcast_url)
+        action_subscriber = ActionSubscriber(bind_url=args.action_url)
+        print("✓ ZMQ broadcaster ready")
 
     # Initialize visualization
     if not args.no_display:
@@ -348,12 +428,48 @@ def main():
     ):
         return 1
 
-    print("\n[5/5] Connecting to detection server...")
-    try:
-        detector = DetectionClient(args.detector_url, args.detector_timeout)
-    except Exception as e:
-        print(f"✗ Failed to connect: {e}")
-        return 1
+    print("\n[5/5] Setting up detection communication...")
+    detector = None
+    image_writer = None
+
+    if args.shared_memory:
+        # Shared memory mode: Create image writer, detection reader
+        # Both sides will retry if the other isn't ready yet
+        try:
+            print("Setting up shared memory communication...")
+            print("(Both processes can start in any order - will retry if needed)")
+
+            # Create image writer (creates shared memory)
+            print("\nCreating shared memory image writer...")
+            image_writer = SharedMemoryImageChannel(
+                name=args.image_shm_name,
+                shape=(config.camera.height, config.camera.width, 3),
+                create=True,
+                retry_count=20,
+                retry_delay=0.5
+            )
+
+            # Connect to detection results (waits for detection server)
+            print("\nConnecting to detection results...")
+            detector = SharedMemoryDetectionClient(
+                detection_shm_name=args.detection_shm_name,
+                retry_count=20,
+                retry_delay=0.5
+            )
+
+            print("\n✓ Shared memory communication ready")
+        except Exception as e:
+            print(f"\n✗ Failed to setup shared memory: {e}")
+            print(f"  Tip: Make sure detection server is running with --shared-memory")
+            print(f"       Both processes can start in any order, but both must be running.")
+            return 1
+    else:
+        # ZMQ mode: Connect to detection server
+        try:
+            detector = DetectionClient(args.detector_url, args.detector_timeout)
+        except Exception as e:
+            print(f"✗ Failed to connect: {e}")
+            return 1
 
     # Initialize decision controller with adaptive throttle
     throttle_policy = {
@@ -379,44 +495,57 @@ def main():
         vehicle_mgr.set_autopilot(True)
         print("\n✓ Autopilot enabled")
 
-    # Register web viewer actions
+    # Register action handlers (for both web viewer and ZMQ)
     paused_state = {'is_paused': False}
+
+    # Define action handlers (shared by web viewer and ZMQ action subscriber)
+    def handle_respawn():
+        """Handle respawn action from any source."""
+        print("\n🔄 Respawn requested")
+        try:
+            # if vehicle_mgr.respawn_vehicle():
+            if vehicle_mgr.teleport_to_spawn_point(args.spawn_point):
+                print("✓ Vehicle respawned successfully")
+                return True
+            else:
+                print("✗ Failed to respawn vehicle")
+                return False
+        except Exception as e:
+            print(f"✗ Respawn error: {e}")
+            return False
+
+    def handle_pause():
+        """Handle pause action from any source."""
+        paused_state['is_paused'] = True
+        print("\n⏸ Paused - simulation loop will freeze")
+        return True
+
+    def handle_resume():
+        """Handle resume action from any source."""
+        paused_state['is_paused'] = False
+        print("\n▶️ Resumed - simulation loop continues")
+        return True
+
+    # Register with ZMQ action subscriber (if broadcasting enabled)
+    if action_subscriber:
+        action_subscriber.register_action('respawn', handle_respawn)
+        action_subscriber.register_action('pause', handle_pause)
+        action_subscriber.register_action('resume', handle_resume)
+        print("\n✓ ZMQ action subscriber registered")
+        print("  Actions: respawn, pause, resume")
+
+    # Register with web viewer (if using web viewer)
     if viz and viewer_type == 'web':
-        def handle_respawn() -> bool:
-            print("\n🔄 Respawn requested from web viewer")
-            try:
-                if vehicle_mgr.respawn_vehicle():
-                    print("✓ Vehicle respawned successfully")
-                else:
-                    print("✗ Failed to respawn vehicle")
-            except Exception as e:
-                print(f"✗ Respawn error: {e}")
-
-        def handle_pause() -> bool:
-            paused_state['is_paused'] = True
-            print("\n⏸ Paused from web viewer - simulation loop will freeze")
-
-        def handle_resume() -> bool:
-            paused_state['is_paused'] = False
-            print("\n▶️ Resumed from web viewer - simulation loop continues")
-
-        # Get the underlying web viewer from VisualizationManager
-        print(f"\n[DEBUG] viz object type: {type(viz)}")
-        print(f"[DEBUG] viz.viewer type: {type(viz.viewer)}")
-        print(f"[DEBUG] Has register_action? {hasattr(viz.viewer, 'register_action')}")
-
         if hasattr(viz, 'viewer') and hasattr(viz.viewer, 'register_action'):
             viz.viewer.register_action('respawn', handle_respawn)
             viz.viewer.register_action('pause', handle_pause)
             viz.viewer.register_action('resume', handle_resume)
-            print("\n✓ Web viewer controls registered successfully!")
-            print("  • Press 'R' or click 'Respawn' button to respawn vehicle")
-            print("  • Press 'Space' or click 'Pause' button to pause/resume simulation")
+            print("\n✓ Web viewer actions registered")
+            print("  Press 'R' or click 'Respawn' button to respawn vehicle")
+            print("  Press 'Space' or click 'Pause' button to pause/resume")
         else:
             print("\n⚠ Warning: Could not register web viewer actions")
-            print(f"  viz has viewer attr: {hasattr(viz, 'viewer')}")
-            if hasattr(viz, 'viewer'):
-                print(f"  viewer has register_action: {hasattr(viz.viewer, 'register_action')}")
+            print(f"  viewer type: {type(viz.viewer) if hasattr(viz, 'viewer') else 'N/A'}")
 
     # Main loop
     print("\n" + "=" * 60)
@@ -455,6 +584,10 @@ def main():
 
     try:
         while True:
+            # Poll for ZMQ actions (non-blocking)
+            if action_subscriber:
+                action_subscriber.poll()
+
             # Check if paused
             if paused_state['is_paused']:
                 time.sleep(0.1)  # Small delay to reduce CPU usage while paused
@@ -473,7 +606,7 @@ def main():
             if latency_tracker:
                 latency_tracker.mark_capture()
 
-            # Send to detector
+            # Send to detector (different methods for shared memory vs ZMQ)
             image_msg = ImageMessage(
                 image=image, timestamp=time.time(), frame_id=frame_count
             )
@@ -482,7 +615,13 @@ def main():
             if latency_tracker:
                 latency_tracker.mark_request_sent()
 
-            detection = detector.detect(image_msg)
+            if args.shared_memory:
+                # Shared memory mode: Write image, read detection
+                image_writer.write(image, timestamp=time.time(), frame_id=frame_count)
+                detection = detector.get_detection(timeout=args.detector_timeout / 1000.0)
+            else:
+                # ZMQ mode: Send image, receive detection
+                detection = detector.detect(image_msg)
 
             # [LATENCY TRACKING] Mark response received (with detection processing time)
             if latency_tracker:
@@ -591,33 +730,33 @@ def main():
                             )
 
                 # Add text overlays
-                cv2.putText(
-                    vis_image,
-                    f"Frame: {frame_count}",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 255, 0),
-                    2,
-                )
-                cv2.putText(
-                    vis_image,
-                    f"Steering: {control.steering:+.3f} | Throttle: {control.throttle:.3f}",
-                    (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                )
-                cv2.putText(
-                    vis_image,
-                    f"Timeouts: {timeouts}",
-                    (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (255, 0, 0) if timeouts > 0 else (0, 255, 0),
-                    2,
-                )
+                # cv2.putText(
+                #     vis_image,
+                #     f"Frame: {frame_count}",
+                #     (10, 30),
+                #     cv2.FONT_HERSHEY_SIMPLEX,
+                #     0.7,
+                #     (0, 255, 0),
+                #     2,
+                # )
+                # cv2.putText(
+                #     vis_image,
+                #     f"Steering: {control.steering:+.3f} | Throttle: {control.throttle:.3f}",
+                #     (10, 60),
+                #     cv2.FONT_HERSHEY_SIMPLEX,
+                #     0.6,
+                #     (0, 255, 0),
+                #     2,
+                # )
+                # cv2.putText(
+                #     vis_image,
+                #     f"Timeouts: {timeouts}",
+                #     (10, 90),
+                #     cv2.FONT_HERSHEY_SIMPLEX,
+                #     0.6,
+                #     (255, 0, 0) if timeouts > 0 else (0, 255, 0),
+                #     2,
+                # )
 
                 # Show detection status
                 status_text = (
@@ -639,23 +778,70 @@ def main():
                     print("\nViewer closed")
                     break
 
+            # Broadcast to ZMQ viewers (if enabled)
+            if broadcaster:
+                # Send raw image ONLY if explicitly enabled (development mode, high bandwidth!)
+                # Production mode: Only send detection data (tiny payload!)
+                # if args.broadcast == "with-images":
+                if args.broadcast:
+                    broadcaster.send_frame(image, frame_count)  # ~50 KB per frame
+
+                # Send detection results (ALWAYS - tiny payload ~200 bytes)
+                if detection:
+                    detection_data = DetectionData(
+                        left_lane={
+                            'x1': float(detection.left_lane.x1),
+                            'y1': float(detection.left_lane.y1),
+                            'x2': float(detection.left_lane.x2),
+                            'y2': float(detection.left_lane.y2),
+                            'confidence': float(detection.left_lane.confidence)
+                        } if detection.left_lane else None,
+                        right_lane={
+                            'x1': float(detection.right_lane.x1),
+                            'y1': float(detection.right_lane.y1),
+                            'x2': float(detection.right_lane.x2),
+                            'y2': float(detection.right_lane.y2),
+                            'confidence': float(detection.right_lane.confidence)
+                        } if detection.right_lane else None,
+                        processing_time_ms=detection.processing_time_ms if hasattr(detection, 'processing_time_ms') else 0.0,
+                        frame_id=frame_count
+                    )
+                    broadcaster.send_detection(detection_data)
+
+                # Send vehicle state
+                velocity = vehicle_mgr.get_velocity()
+                speed_ms = (velocity.x**2 + velocity.y**2 + velocity.z**2)**0.5 if velocity else 0.0
+                vehicle_state = VehicleState(
+                    steering=float(control.steering),
+                    throttle=float(control.throttle),
+                    brake=float(control.brake),
+                    speed_kmh=float(speed_ms * 3.6),  # m/s to km/h
+                    position=None,  # TODO: Get from vehicle_mgr if needed
+                    rotation=None   # TODO: Get from vehicle_mgr if needed
+                )
+                broadcaster.send_state(vehicle_state)
+
             frame_count += 1
 
             # Print status every 30 frames
             if frame_count % 30 == 0:
                 fps = 30 / (time.time() - last_print)
-                lanes = (
-                    "TIMEOUT"
-                    if detection is None
-                    else (
-                        f"{'L' if detection.left_lane else '-'}{'R' if detection.right_lane else '-'}"
-                    )
-                )
+
+                # Lane status
+                if detection is None:
+                    lanes = "TIMEOUT"
+                else:
+                    lanes = f"{'L' if detection.left_lane else '-'}{'R' if detection.right_lane else '-'}"
+
+                # Detection info (add processing time if available)
+                detection_info = ""
+                if detection is not None and hasattr(detection, 'processing_time_ms'):
+                    detection_info = f" | Det: {detection.processing_time_ms:.1f}ms"
 
                 # Build status line with optional latency info
                 status_line = (
-                    f"Frame {frame_count:5d} | FPS: {fps:5.1f} | Lanes: {lanes} | "
-                    f"Steering: {control.steering:+.3f} | Timeouts: {timeouts}"
+                    f"Frame {frame_count:5d} | FPS: {fps:5.1f} | Lanes: {lanes}{detection_info} | "
+                    f"Steering: {control.steering:+.3f} | Throttle: {control.throttle:.2f} | Timeouts: {timeouts}"
                 )
 
                 if latency_tracker:
@@ -684,7 +870,11 @@ def main():
         # Cleanup
         if viz:
             viz.close()
-        detector.close()
+        if detector:
+            detector.close()
+        if image_writer:
+            image_writer.close()
+            image_writer.unlink()
         camera.destroy_camera()
         vehicle_mgr.destroy_vehicle()
         carla_conn.disconnect()

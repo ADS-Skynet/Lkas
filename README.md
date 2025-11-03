@@ -35,11 +35,14 @@ pip install -e ".[dev]"
 pip install -e ".[all]"
 ```
 
-This installs the package as `seame-ads` with two command-line entry points:
+This installs the package as `seame-ads` with three command-line entry points:
 - `simulation` - Main CARLA simulation
 - `lane-detection` - Standalone detection server
+- `viewer` - Remote web viewer (NEW: production mode)
 
 ## 🚀 Quick Start
+
+### Option 1: Development Mode (Classic)
 
 ```bash
 # Terminal 1: Start CARLA server
@@ -53,6 +56,40 @@ simulation --detector-url tcp://localhost:5556 --viewer web --web-port 8080
 
 # Open browser: http://localhost:8080
 ```
+
+### Option 2: Production Mode (NEW! Recommended)
+
+**Better for real vehicles - separates rendering to laptop:**
+
+```bash
+# Terminal 1: Start CARLA server
+./CarlaUE4.sh
+
+# Terminal 2: Start detection server
+lane-detection --method cv --port 5556
+
+# Terminal 3: Start simulation with ZMQ broadcasting
+simulation \
+    --detector-url tcp://localhost:5556 \
+    --viewer none \
+    --broadcast detection-only
+
+# Terminal 4: Start remote viewer (on laptop)
+viewer --vehicle tcp://localhost:5557 --port 8080
+
+# Open browser: http://localhost:8080
+```
+
+**Broadcast Modes:**
+- `--broadcast none` - No broadcasting (default)
+- `--broadcast detection-only` - Production mode (~9 KB/s, recommended for vehicles)
+- `--broadcast with-images` - Development mode (~1.5 MB/s, includes raw images)
+
+**Benefits:**
+- ✅ Vehicle/sim CPU stays lightweight (no rendering!)
+- ✅ Rich overlays drawn on laptop
+- ✅ Remote monitoring capable
+- ✅ Multiple viewers can connect
 
 **Alternative (without entry points):**
 ```bash
@@ -80,7 +117,9 @@ seame-ads/
 │   │
 │   ├── integration/         # System orchestration
 │   │   ├── distributed_orchestrator.py  # Multi-process orchestrator
-│   │   ├── communication.py           # ZMQ communication
+│   │   ├── communication.py           # ZMQ communication (req-rep)
+│   │   ├── zmq_broadcast.py          # NEW: ZMQ broadcasting (pub-sub)
+│   │   ├── shared_memory.py          # NEW: Shared memory (ultra-low latency)
 │   │   ├── messages.py                # Message protocols
 │   │   └── visualization.py           # Visualization manager
 │   │
@@ -127,6 +166,11 @@ seame-ads/
 ├── decision/                ⭐ Control decisions
 │   ├── analyzer.py          # Lane position analysis
 │   └── controller.py        # PD control logic
+│
+├── viewer/                  ⭐ NEW: Remote web viewer
+│   ├── run.py               # ZMQ-based viewer (installed as 'viewer' command)
+│   ├── __init__.py          # Package exports
+│   └── README.md            # Viewer documentation
 │
 └── .docs/                   # Documentation
     ├── START_HERE.md

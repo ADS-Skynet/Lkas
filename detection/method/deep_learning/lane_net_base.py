@@ -367,8 +367,8 @@ class DLLaneDetector:
         """
         height, width = image_shape
 
-        # Define ROI for lane detection (bottom 40% of image)
-        y_min = int(height * 0.6)
+        # Define ROI for lane detection (bottom 50% of image - broader area)
+        y_min = int(height * 0.5)  # Look at bottom 50% (was 0.6 = 40%)
         y_max = height
 
         # Split mask into left and right halves

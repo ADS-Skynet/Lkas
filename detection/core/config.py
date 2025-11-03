@@ -63,12 +63,12 @@ class CVDetectorConfig:
     smoothing_factor: float = 0.7
     min_slope: float = 0.5
 
-    # ROI configuration
-    roi_bottom_left_x: float = 0.1  # fraction of width
-    roi_top_left_x: float = 0.45
-    roi_top_right_x: float = 0.55
-    roi_bottom_right_x: float = 0.9
-    roi_top_y: float = 0.6  # fraction of height
+    # ROI configuration (broader detection area)
+    roi_bottom_left_x: float = 0.05  # fraction of width (bottom-left corner)
+    roi_top_left_x: float = 0.35     # fraction of width (top-left corner) - wider than before
+    roi_top_right_x: float = 0.65    # fraction of width (top-right corner) - wider than before
+    roi_bottom_right_x: float = 0.95 # fraction of width (bottom-right corner)
+    roi_top_y: float = 0.5           # fraction of height (look at top 50% of image)
 
 
 @dataclass

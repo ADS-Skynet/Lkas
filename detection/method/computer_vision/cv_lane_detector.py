@@ -129,8 +129,8 @@ class CVLaneDetector(LaneDetector):
         # Separate left and right lanes
         left_lines, right_lines = self._separate_lanes(lines, width)
 
-        # Average and smooth lanes
-        y_min = int(height * 0.6)
+        # Average and smooth lanes (broader recognition area)
+        y_min = int(height * 0.5)  # Look at bottom 50% (was 0.6 = 40%)
         y_max = height
 
         left_lane_tuple = self._average_lane_lines(left_lines, y_min, y_max)
@@ -211,13 +211,13 @@ class CVLaneDetector(LaneDetector):
     # =========================================================================
 
     def _get_default_roi(self, image_shape: Tuple[int, int]) -> np.ndarray:
-        """Get default ROI based on image shape."""
+        """Get default ROI based on image shape (broader detection area)."""
         height, width = image_shape
         vertices = np.array([[
-            (int(width * 0.1), height),
-            (int(width * 0.45), int(height * 0.6)),
-            (int(width * 0.55), int(height * 0.6)),
-            (int(width * 0.9), height)
+            (int(width * 0.05), height),           # Bottom-left (wider)
+            (int(width * 0.35), int(height * 0.5)),  # Top-left (wider, looks further)
+            (int(width * 0.65), int(height * 0.5)),  # Top-right (wider, looks further)
+            (int(width * 0.95), height)            # Bottom-right (wider)
         ]], dtype=np.int32)
         return vertices
 

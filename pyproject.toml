@@ -88,10 +88,11 @@ all = ["seame-ads[dev,train]"]
 [project.scripts]
 lane-detection = "detection.run:main"
 simulation = "simulation.run:main"
+viewer = "viewer.run:main"
 
 # Package discovery
 [tool.setuptools]
-packages = ["detection", "simulation", "decision", "utils"]
+packages = ["detection", "simulation", "decision", "viewer", "utils"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.yml", "*.json"]
