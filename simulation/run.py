@@ -3,13 +3,12 @@
 Distributed Lane Keeping System - CARLA Client
 
 Features:
-- Multiple visualization backends (OpenCV, Pygame, Web)
-- Auto-detection of best viewer for environment
-- Web viewer for remote/Docker (no X11 needed!)
-- Better support for XQuartz and remote development
+- Shared memory IPC with detection server (ultra-low latency)
+- ZMQ broadcasting for remote viewers
+- Latency tracking and performance monitoring
 
 Usage:
-    simulation --viewer web
+    simulation --broadcast
 
 """
 
@@ -17,19 +16,12 @@ import argparse
 import sys
 from pathlib import Path
 
-import cv2
 import time
 from collections import deque
 from detection.core.config import ConfigManager
-from simulation.integration.visualization import (
-    VisualizationManager,
-    auto_select_viewer,
-)
 from simulation import CARLAConnection, VehicleManager, CameraSensor
 from decision import DecisionController
-from simulation.integration.communication import DetectionClient
 from simulation.integration.messages import (
-    ImageMessage,
     DetectionMessage,
     ControlMessage,
     ControlMode,
@@ -215,9 +207,9 @@ class LatencyStats:
 
 
 def main():
-    """Main entry point for distributed CARLA client with enhanced visualization."""
+    """Main entry point for distributed CARLA client with ZMQ broadcasting."""
     parser = argparse.ArgumentParser(
-        description="Distributed Lane Keeping System - Enhanced Visualization"
+        description="Distributed Lane Keeping System - CARLA Client"
     )
 
     # System options
@@ -235,12 +227,7 @@ def main():
     )
     parser.add_argument("--spawn-point", type=int, default=None)
 
-    # Detection communication mode
-    parser.add_argument(
-        "--shared-memory",
-        action="store_true",
-        help="Use shared memory for detection (ultra-low latency, same machine only)",
-    )
+    # Shared memory detection (default and only IPC method)
     parser.add_argument(
         "--image-shm-name",
         type=str,
@@ -253,23 +240,14 @@ def main():
         default="detection_results",
         help="Shared memory name for detection results (default: detection_results)",
     )
-
-    # ZMQ detection server (used if not --shared-memory)
-    parser.add_argument("--detector-url", type=str, default="tcp://localhost:5556")
-    parser.add_argument("--detector-timeout", type=int, default=1000)
-
-    # Visualization options
     parser.add_argument(
-        "--viewer",
-        type=str,
-        choices=["auto", "opencv", "pygame", "web", "none"],
-        default="auto",
-        help="Visualization backend (auto=auto-detect best)",
+        "--detector-timeout",
+        type=int,
+        default=1000,
+        help="Detection timeout in milliseconds (default: 1000)",
     )
-    parser.add_argument(
-        "--web-port", type=int, default=8080, help="Port for web viewer"
-    )
-    parser.add_argument("--no-display", action="store_true")
+
+    # Other options
     parser.add_argument("--autopilot", action="store_true")
     parser.add_argument(
         "--no-sync", action="store_true", help="Disable synchronous mode"
@@ -329,31 +307,17 @@ def main():
 
     # Print banner
     print("\n" + "=" * 60)
-    print("DISTRIBUTED LANE KEEPING SYSTEM - ENHANCED")
+    print("DISTRIBUTED LANE KEEPING SYSTEM")
     print("=" * 60)
     print(f"CARLA Server: {carla_host}:{carla_port}")
 
-    # Detection mode
-    if args.shared_memory:
-        print(f"Detection Mode: SHARED MEMORY (ultra-low latency ~0.001ms)")
-        print(f"  Image output: {args.image_shm_name}")
-        print(f"  Detection input: {args.detection_shm_name}")
-    else:
-        print(f"Detection Mode: ZMQ (network-capable ~2ms)")
-        print(f"  Detection Server: {args.detector_url}")
+    # Detection mode (shared memory only)
+    print(f"Detection Mode: SHARED MEMORY (ultra-low latency)")
+    print(f"  Image output: {args.image_shm_name}")
+    print(f"  Detection input: {args.detection_shm_name}")
+    print(f"  Timeout: {args.detector_timeout}ms")
 
     print(f"Camera: {config.camera.width}x{config.camera.height}")
-
-    # Determine viewer type
-    if args.no_display:
-        viewer_type = "none"
-    elif args.viewer == "auto":
-        viewer_type = auto_select_viewer()
-        print(f"Auto-selected viewer: {viewer_type}")
-    else:
-        viewer_type = args.viewer
-
-    print(f"Visualization: {viewer_type}")
 
     # ZMQ Broadcasting (NEW: For production/remote viewer)
     if args.broadcast != "none":
@@ -378,18 +342,6 @@ def main():
         broadcaster = VehicleBroadcaster(bind_url=args.broadcast_url)
         action_subscriber = ActionSubscriber(bind_url=args.action_url)
         print("✓ ZMQ broadcaster ready")
-
-    # Initialize visualization
-    if not args.no_display:
-        print(f"\nInitializing {viewer_type} viewer...")
-        viz = VisualizationManager(
-            viewer_type=viewer_type,
-            width=config.camera.width,
-            height=config.camera.height,
-            web_port=args.web_port,
-        )
-    else:
-        viz = None
 
     # Initialize CARLA
     print("\n[1/5] Connecting to CARLA...")
@@ -429,47 +381,37 @@ def main():
         return 1
 
     print("\n[5/5] Setting up detection communication...")
-    detector = None
-    image_writer = None
 
-    if args.shared_memory:
-        # Shared memory mode: Create image writer, detection reader
-        # Both sides will retry if the other isn't ready yet
-        try:
-            print("Setting up shared memory communication...")
-            print("(Both processes can start in any order - will retry if needed)")
+    # Shared memory mode: Create image writer, detection reader
+    # Both sides will retry if the other isn't ready yet
+    try:
+        print("Setting up shared memory communication...")
+        print("(Both processes can start in any order - will retry if needed)")
 
-            # Create image writer (creates shared memory)
-            print("\nCreating shared memory image writer...")
-            image_writer = SharedMemoryImageChannel(
-                name=args.image_shm_name,
-                shape=(config.camera.height, config.camera.width, 3),
-                create=True,
-                retry_count=20,
-                retry_delay=0.5
-            )
+        # Create image writer (creates shared memory)
+        print("\nCreating shared memory image writer...")
+        image_writer = SharedMemoryImageChannel(
+            name=args.image_shm_name,
+            shape=(config.camera.height, config.camera.width, 3),
+            create=True,
+            retry_count=20,
+            retry_delay=0.5
+        )
 
-            # Connect to detection results (waits for detection server)
-            print("\nConnecting to detection results...")
-            detector = SharedMemoryDetectionClient(
-                detection_shm_name=args.detection_shm_name,
-                retry_count=20,
-                retry_delay=0.5
-            )
+        # Connect to detection results (waits for detection server)
+        print("\nConnecting to detection results...")
+        detector = SharedMemoryDetectionClient(
+            detection_shm_name=args.detection_shm_name,
+            retry_count=20,
+            retry_delay=0.5
+        )
 
-            print("\n✓ Shared memory communication ready")
-        except Exception as e:
-            print(f"\n✗ Failed to setup shared memory: {e}")
-            print(f"  Tip: Make sure detection server is running with --shared-memory")
-            print(f"       Both processes can start in any order, but both must be running.")
-            return 1
-    else:
-        # ZMQ mode: Connect to detection server
-        try:
-            detector = DetectionClient(args.detector_url, args.detector_timeout)
-        except Exception as e:
-            print(f"✗ Failed to connect: {e}")
-            return 1
+        print("\n✓ Shared memory communication ready")
+    except Exception as e:
+        print(f"\n✗ Failed to setup shared memory: {e}")
+        print(f"  Tip: Make sure detection server is running")
+        print(f"       Both processes can start in any order, but both must be running.")
+        return 1
 
     # Initialize decision controller with adaptive throttle
     throttle_policy = {
@@ -534,19 +476,6 @@ def main():
         print("\n✓ ZMQ action subscriber registered")
         print("  Actions: respawn, pause, resume")
 
-    # Register with web viewer (if using web viewer)
-    if viz and viewer_type == 'web':
-        if hasattr(viz, 'viewer') and hasattr(viz.viewer, 'register_action'):
-            viz.viewer.register_action('respawn', handle_respawn)
-            viz.viewer.register_action('pause', handle_pause)
-            viz.viewer.register_action('resume', handle_resume)
-            print("\n✓ Web viewer actions registered")
-            print("  Press 'R' or click 'Respawn' button to respawn vehicle")
-            print("  Press 'Space' or click 'Pause' button to pause/resume")
-        else:
-            print("\n⚠ Warning: Could not register web viewer actions")
-            print(f"  viewer type: {type(viz.viewer) if hasattr(viz, 'viewer') else 'N/A'}")
-
     # Main loop
     print("\n" + "=" * 60)
     print("System Running")
@@ -557,7 +486,6 @@ def main():
     frame_count = 0
     timeouts = 0
     last_print = time.time()
-    warmup_complete = False
 
     # Initialize latency tracker (optional)
     latency_tracker = LatencyStats(window_size=100) if args.latency else None
@@ -606,22 +534,14 @@ def main():
             if latency_tracker:
                 latency_tracker.mark_capture()
 
-            # Send to detector (different methods for shared memory vs ZMQ)
-            image_msg = ImageMessage(
-                image=image, timestamp=time.time(), frame_id=frame_count
-            )
-
+            # Send to detector via shared memory
             # [LATENCY TRACKING] Mark request sent timestamp
             if latency_tracker:
                 latency_tracker.mark_request_sent()
 
-            if args.shared_memory:
-                # Shared memory mode: Write image, read detection
-                image_writer.write(image, timestamp=time.time(), frame_id=frame_count)
-                detection = detector.get_detection(timeout=args.detector_timeout / 1000.0)
-            else:
-                # ZMQ mode: Send image, receive detection
-                detection = detector.detect(image_msg)
+            # Write image to shared memory, read detection result
+            image_writer.write(image, timestamp=time.time(), frame_id=frame_count)
+            detection = detector.get_detection(timeout=args.detector_timeout / 1000.0)
 
             # [LATENCY TRACKING] Mark response received (with detection processing time)
             if latency_tracker:
@@ -630,9 +550,6 @@ def main():
                 elif detection is not None:
                     # Estimate if processing time not available
                     latency_tracker.mark_response_received(0.0)
-
-            # Determine if we're still in warmup phase
-            in_warmup = frame_count < args.warmup_frames
 
             # Check if we have valid detections (not None AND at least one lane exists)
             has_valid_detection = detection is not None and (
@@ -701,82 +618,6 @@ def main():
                 #         print(
                 #             f"[{mode}] Frame {frame_count:3d}: steering={steering:+.3f}, throttle={throttle:.3f}, brake={control.brake:.3f}"
                 #         )
-
-            # Visualize
-            if viz:
-                # Use debug image from detector if available, otherwise use raw image
-                if detection is not None and detection.debug_image is not None:
-                    vis_image = detection.debug_image.copy()
-                else:
-                    vis_image = image.copy()
-
-                    # Draw lanes manually if debug_image not available
-                    if detection is not None:
-                        if detection.left_lane:
-                            cv2.line(
-                                vis_image,
-                                (detection.left_lane.x1, detection.left_lane.y1),
-                                (detection.left_lane.x2, detection.left_lane.y2),
-                                (255, 0, 0),
-                                5,
-                            )
-                        if detection.right_lane:
-                            cv2.line(
-                                vis_image,
-                                (detection.right_lane.x1, detection.right_lane.y1),
-                                (detection.right_lane.x2, detection.right_lane.y2),
-                                (0, 0, 255),
-                                5,
-                            )
-
-                # Add text overlays
-                # cv2.putText(
-                #     vis_image,
-                #     f"Frame: {frame_count}",
-                #     (10, 30),
-                #     cv2.FONT_HERSHEY_SIMPLEX,
-                #     0.7,
-                #     (0, 255, 0),
-                #     2,
-                # )
-                # cv2.putText(
-                #     vis_image,
-                #     f"Steering: {control.steering:+.3f} | Throttle: {control.throttle:.3f}",
-                #     (10, 60),
-                #     cv2.FONT_HERSHEY_SIMPLEX,
-                #     0.6,
-                #     (0, 255, 0),
-                #     2,
-                # )
-                # cv2.putText(
-                #     vis_image,
-                #     f"Timeouts: {timeouts}",
-                #     (10, 90),
-                #     cv2.FONT_HERSHEY_SIMPLEX,
-                #     0.6,
-                #     (255, 0, 0) if timeouts > 0 else (0, 255, 0),
-                #     2,
-                # )
-
-                # Show detection status
-                status_text = (
-                    "Detection: OK" if detection is not None else "Detection: TIMEOUT"
-                )
-                status_color = (0, 255, 0) if detection is not None else (255, 0, 0)
-                cv2.putText(
-                    vis_image,
-                    status_text,
-                    (10, 120),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    status_color,
-                    2,
-                )
-
-                # Show image
-                if not viz.show(vis_image):
-                    print("\nViewer closed")
-                    break
 
             # Broadcast to ZMQ viewers (if enabled)
             if broadcaster:
@@ -868,8 +709,6 @@ def main():
         print("\n\nStopping...")
     finally:
         # Cleanup
-        if viz:
-            viz.close()
         if detector:
             detector.close()
         if image_writer:

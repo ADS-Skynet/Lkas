@@ -247,7 +247,8 @@ class ViewerSubscriber:
                 # Print stats
                 if time.time() - self.last_print_time > 3.0:
                     fps = self.frame_count / (time.time() - self.last_print_time)
-                    print(f"\r[Subscriber] Receiving {fps:.1f} FPS | Frame {metadata['frame_id']}", end="", flush=True)
+                    print(f"[Subscriber] Receiving {fps:.1f} FPS | Frame {metadata['frame_id']}", end='\r', flush=True)
+                    print('\n')
                     self.frame_count = 0
                     self.last_print_time = time.time()
 
