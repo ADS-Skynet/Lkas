@@ -61,4 +61,6 @@ htmlcov/
 Thumbs.db
 
 # User Specific
-siwoo/
+.claude/
+.devcontainer/
+.vscode/
