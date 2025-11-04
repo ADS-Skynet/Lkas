@@ -17,8 +17,6 @@ from .messages import (
 )
 
 from .shared_memory_detection import (
-    SharedMemoryDetectionServer,
-    SharedMemoryDetectionClient,
     SharedMemoryImageChannel,
     SharedMemoryDetectionChannel
 )
@@ -37,12 +35,8 @@ __all__ = [
     'SystemStatus',
     'PerformanceMetrics',
 
-    # Shared Memory - Detection
-    'SharedMemoryDetectionServer',
-    'SharedMemoryDetectionClient',
+    # Shared Memory - Channels
     'SharedMemoryImageChannel',
     'SharedMemoryDetectionChannel',
-
-    # Shared Memory - Control
     'SharedMemoryControlChannel',
 ]

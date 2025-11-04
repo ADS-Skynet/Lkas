@@ -11,12 +11,12 @@ import time
 import numpy as np
 from typing import Tuple
 
-from detection.core.interfaces import LaneDetector
-from detection.core.models import Lane, DetectionResult
-from detection.core.config import DLDetectorConfig
+from lkas.detection.core.interfaces import LaneDetector
+from lkas.detection.core.models import Lane, DetectionResult
+from lkas.detection.core.config import DLDetectorConfig
 
 # Import the base DL detector implementation
-from detection.method.deep_learning.lane_net_base import DLLaneDetector as _BaseDLLaneDetector
+from lkas.detection.method.deep_learning.lane_net_base import DLLaneDetector as _BaseDLLaneDetector
 
 
 class DLLaneDetector(LaneDetector):

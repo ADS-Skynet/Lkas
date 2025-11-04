@@ -11,9 +11,9 @@ For C++ developers:
 import numpy as np
 from typing import Tuple
 
-from detection.core.interfaces import LaneDetector
-from detection.core.models import DetectionResult, LaneMetrics
-from decision.lane_analyzer import LaneAnalyzer
+from lkas.detection.core.interfaces import LaneDetector
+from lkas.detection.core.models import DetectionResult, LaneMetrics
+from lkas.decision.lane_analyzer import LaneAnalyzer
 from simulation.utils.visualizer import LKASVisualizer
 
 
@@ -205,11 +205,11 @@ if __name__ == "__main__":
     # Example usage
     print("Testing FrameProcessor...")
 
-    from core.config import Config
-    from core.factory import DetectorFactory
+    from lkas.detection.core.config import ConfigManager
+    from lkas.detection.core.factory import DetectorFactory
 
     # Create components
-    config = Config()
+    config = ConfigManager()
     factory = DetectorFactory(config)
     detector = factory.create('cv')
     analyzer = LaneAnalyzer(

@@ -10,7 +10,7 @@ For C++ developers:
     Formula: output = Kp * error + Kd * derivative(error)
 """
 
-from detection.core.models import LaneMetrics, Lane
+from lkas.detection.core.models import LaneMetrics, Lane
 
 
 class PDController:
@@ -225,7 +225,7 @@ if __name__ == "__main__":
     # Example usage
     print("Testing PDController...")
 
-    from core.models import LaneMetrics, LaneDepartureStatus
+    from lkas.detection.core.models import LaneMetrics, LaneDepartureStatus
 
     # Create controller
     controller = PDController(kp=0.5, kd=0.1)

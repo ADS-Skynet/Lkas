@@ -19,9 +19,9 @@ import numpy as np
 import time
 from typing import Tuple, List
 
-from detection.core.interfaces import LaneDetector  # ABC = Abstract Base Class
-from detection.core.models import Lane, DetectionResult  # Type-safe data models
-from detection.core.config import CVDetectorConfig  # Configuration
+from lkas.detection.core.interfaces import LaneDetector  # ABC = Abstract Base Class
+from lkas.detection.core.models import Lane, DetectionResult  # Type-safe data models
+from lkas.detection.core.config import CVDetectorConfig  # Configuration
 
 
 class CVLaneDetector(LaneDetector):

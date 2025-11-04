@@ -41,11 +41,11 @@ import numpy as np
 import time
 import json
 from dataclasses import dataclass, asdict
-from typing import Optional, Callable
+from typing import Optional
 from multiprocessing import shared_memory, Lock, Value
 import struct
 
-from detection.integration.messages import ImageMessage, DetectionMessage, LaneMessage
+from lkas.detection.integration.messages import ImageMessage, DetectionMessage, LaneMessage
 
 
 # =============================================================================
@@ -515,168 +515,10 @@ class SharedMemoryDetectionChannel:
 
 
 # =============================================================================
-# Detection Service (Runs in separate process)
+# Note: DetectionClient has been moved to detection/client.py
 # =============================================================================
-
-class SharedMemoryDetectionServer:
-    """
-    Detection server using shared memory for ultra-low latency.
-
-    Usage:
-        server = SharedMemoryDetectionServer(
-            image_shm_name="camera_feed",
-            detection_shm_name="detection_results",
-            image_shape=(600, 800, 3)
-        )
-        server.serve(detection_callback)
-    """
-
-    def __init__(self,
-                 image_shm_name: str,
-                 detection_shm_name: str,
-                 image_shape: tuple,
-                 retry_count: int = 20,
-                 retry_delay: float = 0.5):
-        """
-        Initialize shared memory detection server.
-
-        Args:
-            image_shm_name: Name of image shared memory (from camera)
-            detection_shm_name: Name of detection shared memory (to control)
-            image_shape: Expected image shape (height, width, channels)
-            retry_count: Number of retry attempts for connection (default: 20)
-            retry_delay: Delay between retries in seconds (default: 0.5)
-        """
-        self.image_shm_name = image_shm_name
-        self.detection_shm_name = detection_shm_name
-        self.image_shape = image_shape
-
-        # Connect to image shared memory (reader) with retry
-        print(f"Connecting to image shared memory '{image_shm_name}'...")
-        self.image_channel = SharedMemoryImageChannel(
-            name=image_shm_name,
-            shape=image_shape,
-            create=False,
-            retry_count=retry_count,
-            retry_delay=retry_delay
-        )
-
-        # Create detection shared memory (writer)
-        print(f"Creating detection shared memory '{detection_shm_name}'...")
-        self.detection_channel = SharedMemoryDetectionChannel(
-            name=detection_shm_name,
-            create=True,
-            retry_count=retry_count,
-            retry_delay=retry_delay
-        )
-
-        self.running = False
-        self.frame_count = 0
-        self.last_print_time = time.time()
-
-    def serve(self, detection_callback: Callable[[ImageMessage], DetectionMessage], print_stats: bool = True):
-        """
-        Start serving detection requests.
-
-        Args:
-            detection_callback: Function that processes images and returns detections
-            print_stats: Whether to print performance statistics (default: True)
-        """
-        print("\n" + "=" * 60)
-        print("Shared Memory Detection Server Running")
-        print("=" * 60)
-        print(f"Reading images from: {self.image_shm_name}")
-        print(f"Writing detections to: {self.detection_shm_name}")
-        print("Press Ctrl+C to stop")
-        print("=" * 60 + "\n")
-
-        self.running = True
-
-        try:
-            while self.running:
-                # Read image from shared memory (non-blocking with short timeout)
-                image_msg = self.image_channel.read_blocking(timeout=0.1, copy=True)
-
-                if image_msg is None:
-                    continue
-
-                # Process detection
-                detection_msg = detection_callback(image_msg)
-
-                # Write results to shared memory
-                self.detection_channel.write(detection_msg)
-
-                self.frame_count += 1
-
-                # Stats tracking and optional printing
-                if time.time() - self.last_print_time > 3.0:
-                    if print_stats:
-                        fps = self.frame_count / (time.time() - self.last_print_time)
-                        print(f"\r{fps:.1f} FPS | Frame {image_msg.frame_id} | "
-                              f"Processing: {detection_msg.processing_time_ms:.2f}ms", end="", flush=True)
-                    self.frame_count = 0
-                    self.last_print_time = time.time()
-
-        except KeyboardInterrupt:
-            print("\n\nStopping shared memory server...")
-        finally:
-            self.stop()
-
-    def stop(self):
-        """Stop the server and cleanup."""
-        self.running = False
-        self.image_channel.close()
-        self.detection_channel.close()
-        self.detection_channel.unlink()
-        print("✓ Shared memory detection server stopped")
-
-
+#
+# The DetectionClient class pairs with DetectionServer to form a complete
+# client-server architecture using shared memory for communication.
+# It has been moved to detection/client.py for better organization.
 # =============================================================================
-# Detection Client (Runs in camera/control process)
-# =============================================================================
-
-class SharedMemoryDetectionClient:
-    """
-    Client for reading detection results from shared memory.
-
-    Usage:
-        client = SharedMemoryDetectionClient(
-            detection_shm_name="detection_results"
-        )
-        detection = client.get_detection()
-    """
-
-    def __init__(self, detection_shm_name: str, retry_count: int = 20, retry_delay: float = 0.5):
-        """
-        Initialize shared memory detection client.
-
-        Args:
-            detection_shm_name: Name of detection shared memory
-            retry_count: Number of retry attempts for connection (default: 20)
-            retry_delay: Delay between retries in seconds (default: 0.5)
-        """
-        self.detection_shm_name = detection_shm_name
-
-        # Connect to detection shared memory (reader) with retry
-        self.detection_channel = SharedMemoryDetectionChannel(
-            name=detection_shm_name,
-            create=False,
-            retry_count=retry_count,
-            retry_delay=retry_delay
-        )
-
-    def get_detection(self, timeout: float = 1.0) -> Optional[DetectionMessage]:
-        """
-        Get latest detection results.
-
-        Args:
-            timeout: Maximum wait time (not implemented yet)
-
-        Returns:
-            DetectionMessage or None
-        """
-        return self.detection_channel.read()
-
-    def close(self):
-        """Close connection."""
-        self.detection_channel.close()

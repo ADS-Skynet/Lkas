@@ -32,18 +32,19 @@ import signal
 import time
 from pathlib import Path
 
-from detection.core.config import ConfigManager
-from detection.integration.messages import DetectionMessage, ControlMessage
-from detection.integration.shared_memory_detection import SharedMemoryDetectionChannel
-from detection.integration.shared_memory_control import SharedMemoryControlChannel
-from decision import DecisionController
-from core.constants import CommunicationConstants
+from lkas.detection.core.config import ConfigManager
+from lkas.detection.integration.messages import DetectionMessage, ControlMessage
+from lkas.detection.integration.shared_memory_detection import SharedMemoryDetectionChannel
+from lkas.detection.integration.shared_memory_control import SharedMemoryControlChannel
+from lkas.decision import DecisionController
+from simulation.constants import CommunicationConstants
 
 
-class DecisionService:
+class DecisionServer:
     """
-    Standalone server that wraps decision module.
+    Standalone server that runs decision module.
     Uses shared memory for ultra-low latency communication.
+    Pairs with DecisionClient for clean client-server architecture.
     """
 
     def __init__(
@@ -218,7 +219,7 @@ def main():
     print(f"✓ Configuration loaded")
 
     # Create and run server
-    server = DecisionService(
+    server = DecisionServer(
         config=config,
         detection_shm_name=args.detection_shm_name,
         control_shm_name=args.control_shm_name,

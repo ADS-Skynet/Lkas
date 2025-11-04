@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Optional
 from multiprocessing import shared_memory, Lock
 
-from detection.integration.messages import ControlMessage, ControlMode
+from lkas.detection.integration.messages import ControlMessage, ControlMode
 
 
 # =============================================================================

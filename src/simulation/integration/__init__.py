@@ -1,13 +1,28 @@
 """
-Integration layer for coordinating CARLA, Detection, and Decision modules.
+Integration layer for coordinating CARLA with LKAS (Lane Keeping Assist System).
 
-Note: Message definitions and shared memory channels have been moved to
-detection.integration to better reflect their ownership by the detection module.
+Note: LKAS components are in the lkas module.
 This module maintains backwards compatibility by re-exporting them.
+
+For communication with LKAS, use the clean API:
+    from lkas import LKAS
+
+    lkas = LKAS(image_shape=(600, 800, 3))
+    lkas.send_image(image, timestamp, frame_id)
+    control = lkas.get_control()
+
+Or use components directly:
+    from lkas.detection import DetectionClient
+
+    client = DetectionClient(
+        detection_shm_name="detection_results",
+        image_shm_name="camera_feed",
+        image_shape=(600, 800, 3)
+    )
 """
 
-# Re-export messages from their new location in detection.integration
-from detection.integration.messages import (
+# Re-export messages from lkas.detection.integration
+from lkas.detection.integration.messages import (
     ImageMessage,
     LaneMessage,
     DetectionMessage,
@@ -17,19 +32,8 @@ from detection.integration.messages import (
     PerformanceMetrics
 )
 
-# Re-export shared memory from detection.integration
-from detection.integration.shared_memory_detection import (
-    SharedMemoryDetectionServer,
-    SharedMemoryDetectionClient,
-    SharedMemoryImageChannel,
-    SharedMemoryDetectionChannel
-)
-
-# Local simulation-specific communication (ZMQ)
-from .communication import DetectionClient, DetectionServer
-
-# Orchestrators are imported directly where needed to avoid circular imports
-# Use: from simulation.integration.distributed_orchestrator import DistributedOrchestrator
+# Re-export detection communication API (for backwards compatibility)
+from lkas.detection import DetectionClient
 
 __all__ = [
     # Messages
@@ -41,13 +45,6 @@ __all__ = [
     'SystemStatus',
     'PerformanceMetrics',
 
-    # Shared Memory
-    'SharedMemoryDetectionServer',
-    'SharedMemoryDetectionClient',
-    'SharedMemoryImageChannel',
-    'SharedMemoryDetectionChannel',
-
-    # ZMQ Communication
+    # Detection Communication (clean API)
     'DetectionClient',
-    'DetectionServer',
 ]

@@ -16,9 +16,9 @@ Note: This has been refactored to use SimulationOrchestrator for clean architect
 import argparse
 import sys
 
-from detection.core.config import ConfigManager
+from lkas.detection.core.config import ConfigManager
 from simulation.orchestrator import SimulationOrchestrator, SimulationConfig
-from core.constants import CommunicationConstants, SimulationConstants
+from simulation.constants import CommunicationConstants, SimulationConstants
 
 
 def parse_arguments() -> argparse.Namespace:

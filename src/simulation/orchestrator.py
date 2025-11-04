@@ -11,21 +11,18 @@ import sys
 from typing import Optional, Callable
 from dataclasses import dataclass
 
-from detection.core.config import ConfigManager
+from lkas.detection.core.config import ConfigManager
 from simulation import CARLAConnection, VehicleManager, CameraSensor
-from decision import DecisionController
-from detection.integration.messages import ControlMessage, ControlMode
+from lkas.decision import DecisionController, DecisionClient
+from lkas.detection.integration.messages import ControlMessage, ControlMode
 from simulation.integration.zmq_broadcast import (
     VehicleBroadcaster,
     ActionSubscriber,
     DetectionData,
     VehicleState,
 )
-from detection.integration.shared_memory_detection import (
-    SharedMemoryImageChannel,
-    SharedMemoryDetectionClient,
-)
-from core.constants import SimulationConstants
+from lkas.detection import DetectionClient
+from simulation.constants import SimulationConstants
 
 
 @dataclass
@@ -45,6 +42,9 @@ class SimulationConfig:
     base_throttle: float
     warmup_frames: int
     enable_latency_tracking: bool
+    # Decision mode: "internal" (in-process) or "external" (via decision server)
+    decision_mode: str = "internal"
+    control_shm_name: str = "control_commands"
 
 
 class SimulationOrchestrator:
@@ -74,9 +74,10 @@ class SimulationOrchestrator:
         self.carla_conn: Optional[CARLAConnection] = None
         self.vehicle_mgr: Optional[VehicleManager] = None
         self.camera: Optional[CameraSensor] = None
-        self.image_writer: Optional[SharedMemoryImageChannel] = None
-        self.detector: Optional[SharedMemoryDetectionClient] = None
+        self.detection_client: Optional[DetectionClient] = None
+        # Decision: either in-process controller or external decision client
         self.controller: Optional[DecisionController] = None
+        self.decision_client: Optional[DecisionClient] = None
         self.broadcaster: Optional[VehicleBroadcaster] = None
         self.action_subscriber: Optional[ActionSubscriber] = None
 
@@ -168,32 +169,24 @@ class SimulationOrchestrator:
         print("\n[4/5] Setting up detection communication...")
 
         try:
-            print("Setting up shared memory communication...")
+            print("Setting up detection client...")
             print("(Both processes can start in any order - will retry if needed)")
 
-            # Create image writer
-            print("\nCreating shared memory image writer...")
-            self.image_writer = SharedMemoryImageChannel(
-                name=self.config.image_shm_name,
-                shape=(
+            # Create bidirectional detection client (writes images, reads detections)
+            print("\nConnecting to detection server...")
+            self.detection_client = DetectionClient(
+                detection_shm_name=self.config.detection_shm_name,
+                image_shm_name=self.config.image_shm_name,
+                image_shape=(
                     self.system_config.camera.height,
                     self.system_config.camera.width,
                     3
                 ),
-                create=True,
                 retry_count=SimulationConstants.DEFAULT_RETRY_COUNT,
                 retry_delay=SimulationConstants.RETRY_DELAY_SECONDS
             )
 
-            # Connect to detection results
-            print("\nConnecting to detection results...")
-            self.detector = SharedMemoryDetectionClient(
-                detection_shm_name=self.config.detection_shm_name,
-                retry_count=SimulationConstants.DEFAULT_RETRY_COUNT,
-                retry_delay=SimulationConstants.RETRY_DELAY_SECONDS
-            )
-
-            print("\n✓ Shared memory communication ready")
+            print("\n✓ Detection client ready")
             return True
 
         except Exception as e:
@@ -203,27 +196,45 @@ class SimulationOrchestrator:
             return False
 
     def _setup_controller(self):
-        """Setup decision controller."""
-        print("\n[5/5] Setting up controller...")
+        """Setup decision controller (internal mode) or decision client (external mode)."""
+        print("\n[5/5] Setting up decision...")
 
-        throttle_policy = {
-            "base": self.system_config.throttle_policy.base,
-            "min": self.system_config.throttle_policy.min,
-            "steer_threshold": self.system_config.throttle_policy.steer_threshold,
-            "steer_max": self.system_config.throttle_policy.steer_max,
-        }
+        if self.config.decision_mode == "external":
+            # External decision server mode
+            print("Mode: External (via decision server)")
+            try:
+                self.decision_client = DecisionClient(
+                    shm_name=self.config.control_shm_name,
+                    retry_count=SimulationConstants.DEFAULT_RETRY_COUNT,
+                    retry_delay=SimulationConstants.RETRY_DELAY_SECONDS
+                )
+                print(f"✓ Connected to decision server")
+                print(f"  Reading controls from: {self.config.control_shm_name}")
+            except Exception as e:
+                print(f"✗ Failed to connect to decision server: {e}")
+                print(f"  Tip: Make sure decision server is running (decision-server)")
+                raise
+        else:
+            # Internal decision controller mode
+            print("Mode: Internal (in-process)")
+            throttle_policy = {
+                "base": self.system_config.throttle_policy.base,
+                "min": self.system_config.throttle_policy.min,
+                "steer_threshold": self.system_config.throttle_policy.steer_threshold,
+                "steer_max": self.system_config.throttle_policy.steer_max,
+            }
 
-        self.controller = DecisionController(
-            image_width=self.system_config.camera.width,
-            image_height=self.system_config.camera.height,
-            kp=self.system_config.controller.kp,
-            kd=self.system_config.controller.kd,
-            throttle_policy=throttle_policy,
-        )
+            self.controller = DecisionController(
+                image_width=self.system_config.camera.width,
+                image_height=self.system_config.camera.height,
+                kp=self.system_config.controller.kp,
+                kd=self.system_config.controller.kd,
+                throttle_policy=throttle_policy,
+            )
 
-        print(f"✓ Controller ready")
-        print(f"  Adaptive throttle: base={self.system_config.throttle_policy.base}, "
-              f"min={self.system_config.throttle_policy.min}")
+            print(f"✓ Controller ready")
+            print(f"  Adaptive throttle: base={self.system_config.throttle_policy.base}, "
+                  f"min={self.system_config.throttle_policy.min}")
 
     def _setup_broadcasting(self):
         """Setup ZMQ broadcasting for remote viewer."""
@@ -308,8 +319,8 @@ class SimulationOrchestrator:
                     continue
 
                 # Send to detector and get result
-                self.image_writer.write(image, timestamp=time.time(), frame_id=self.frame_count)
-                detection = self.detector.get_detection(
+                self.detection_client.send_image(image, timestamp=time.time(), frame_id=self.frame_count)
+                detection = self.detection_client.get_detection(
                     timeout=self.config.detector_timeout / 1000.0
                 )
 
@@ -342,23 +353,38 @@ class SimulationOrchestrator:
 
     def _process_detection(self, detection):
         """Process detection result and compute control."""
-        # Check if we have valid detection
-        has_valid_detection = detection is not None and (
-            detection.left_lane is not None or detection.right_lane is not None
-        )
 
-        if not has_valid_detection:
-            self.timeouts += 1
-            # No detection: use base throttle to keep moving
-            return ControlMessage(
-                steering=0.0,
-                throttle=self.config.base_throttle,
-                brake=0.0,
-                mode=ControlMode.LANE_KEEPING,
-            )
+        if self.decision_client is not None:
+            # External mode: read control from decision server
+            control = self.decision_client.get_control()
+            if control is None:
+                # No control received, use safe defaults
+                return ControlMessage(
+                    steering=0.0,
+                    throttle=self.config.base_throttle,
+                    brake=0.0,
+                    mode=ControlMode.LANE_KEEPING,
+                )
+            return control
         else:
-            # Valid detection: use controller
-            return self.controller.process_detection(detection)
+            # Internal mode: compute control in-process
+            # Check if we have valid detection
+            has_valid_detection = detection is not None and (
+                detection.left_lane is not None or detection.right_lane is not None
+            )
+
+            if not has_valid_detection:
+                self.timeouts += 1
+                # No detection: use base throttle to keep moving
+                return ControlMessage(
+                    steering=0.0,
+                    throttle=self.config.base_throttle,
+                    brake=0.0,
+                    mode=ControlMode.LANE_KEEPING,
+                )
+            else:
+                # Valid detection: use controller
+                return self.controller.process_detection(detection)
 
     def _broadcast_data(self, image, detection, control):
         """Broadcast data to remote viewers."""
@@ -436,12 +462,12 @@ class SimulationOrchestrator:
         """Cleanup all resources."""
         print("\nCleaning up...")
 
-        if self.detector:
-            self.detector.close()
+        if self.detection_client:
+            self.detection_client.close()
+            self.detection_client.unlink()
 
-        if self.image_writer:
-            self.image_writer.close()
-            self.image_writer.unlink()
+        if self.decision_client:
+            self.decision_client.close()
 
         if self.camera:
             self.camera.destroy_camera()
