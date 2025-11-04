@@ -14,14 +14,14 @@ from dataclasses import dataclass
 from detection.core.config import ConfigManager
 from simulation import CARLAConnection, VehicleManager, CameraSensor
 from decision import DecisionController
-from simulation.integration.messages import ControlMessage, ControlMode
+from detection.integration.messages import ControlMessage, ControlMode
 from simulation.integration.zmq_broadcast import (
     VehicleBroadcaster,
     ActionSubscriber,
     DetectionData,
     VehicleState,
 )
-from simulation.integration.shared_memory_detection import (
+from detection.integration.shared_memory_detection import (
     SharedMemoryImageChannel,
     SharedMemoryDetectionClient,
 )

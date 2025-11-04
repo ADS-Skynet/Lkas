@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from simulation.integration.zmq_broadcast import ViewerSubscriber, ActionPublisher, DetectionData, VehicleState
 from simulation.utils.visualizer import LKASVisualizer
-from simulation.utils.lane_analyzer import LaneDepartureStatus
+from detection.core.models import LaneDepartureStatus
 
 
 class ZMQWebViewer:

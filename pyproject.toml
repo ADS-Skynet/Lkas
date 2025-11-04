@@ -87,6 +87,7 @@ all = ["seame-ads[dev,train]"]
 # Entry points for command-line scripts
 [project.scripts]
 lane-detection = "detection.run:main"
+decision-server = "decision.run:main"
 simulation = "simulation.run:main"
 viewer = "viewer.run:main"
 

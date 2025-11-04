@@ -7,7 +7,7 @@ Standalone detector that processes images and returns lane detection results.
 import numpy as np
 import time
 
-from simulation.integration.messages import ImageMessage, DetectionMessage, LaneMessage
+from detection.integration.messages import ImageMessage, DetectionMessage, LaneMessage
 from detection.core.factory import DetectorFactory
 from detection.core.config import Config
 

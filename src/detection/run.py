@@ -26,8 +26,8 @@ from pathlib import Path
 
 from detection.core.config import ConfigManager
 from detection import LaneDetection
-from simulation.integration.shared_memory_detection import SharedMemoryDetectionServer
-from simulation.integration.messages import ImageMessage, DetectionMessage
+from detection.integration.shared_memory_detection import SharedMemoryDetectionServer
+from detection.integration.messages import ImageMessage, DetectionMessage
 
 
 class DetectionService:

@@ -13,7 +13,7 @@ from typing import Tuple
 
 from detection.core.interfaces import LaneDetector
 from detection.core.models import DetectionResult, LaneMetrics
-from simulation.utils.lane_analyzer import LaneAnalyzer
+from decision.lane_analyzer import LaneAnalyzer
 from simulation.utils.visualizer import LKASVisualizer
 
 

@@ -1,12 +1,16 @@
 """
-Processing components for lane detection pipeline.
+Processing components for simulation-specific pipeline.
 
-These components handle the business logic between detection and control.
+Note: PDController has been moved to decision.pd_controller as it contains
+vehicle-agnostic control logic. This module maintains backwards compatibility
+by re-exporting it.
 """
 
 from .frame_processor import FrameProcessor
-from .pd_controller import PDController
 from .metrics_logger import MetricsLogger
+
+# Re-export from decision module for backwards compatibility
+from decision.pd_controller import PDController
 
 __all__ = [
     'FrameProcessor',

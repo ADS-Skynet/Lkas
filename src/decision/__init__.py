@@ -1,13 +1,22 @@
 """
 Decision Module
 
-Handles decision-making and control logic based on lane detection:
+Vehicle-agnostic decision-making and control logic:
+- Lane analysis and position estimation
+- PD control for steering computation
+- Adaptive throttle policy
 - Control command generation (steering, throttle, brake)
-- Path planning and trajectory control
 
-Note: LaneAnalyzer moved to simulation.utils.lane_analyzer to avoid circular dependencies
+This module produces generic control commands that work for any vehicle
+(CARLA simulation, real vehicle, etc.) without platform-specific code.
 """
 
 from .controller import DecisionController
+from .pd_controller import PDController
+from .lane_analyzer import LaneAnalyzer
 
-__all__ = ['DecisionController']
+__all__ = [
+    'DecisionController',
+    'PDController',
+    'LaneAnalyzer',
+]

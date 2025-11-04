@@ -19,7 +19,7 @@ import json
 
 from dataclasses import asdict
 
-from .messages import ImageMessage, DetectionMessage, LaneMessage
+from detection.integration.messages import ImageMessage, DetectionMessage, LaneMessage
 
 
 class InputSerial:

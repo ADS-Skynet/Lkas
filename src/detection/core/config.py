@@ -236,9 +236,41 @@ class ConfigManager:
 
             # Parse CV detector config
             cv_cfg = CVDetectorConfig()
-            if 'lane_detection' in data and 'cv_params' in data['lane_detection']:
-                cv_data = data['lane_detection']['cv_params']
-                cv_cfg = CARLAConfig(**{k: v for k, v in cv_data.items() if hasattr(cv_cfg, k)})
+            if 'cv_detector' in data:
+                cv_data = data['cv_detector']
+                cv_cfg = CVDetectorConfig(
+                    canny_low=cv_data.get('canny_low', cv_cfg.canny_low),
+                    canny_high=cv_data.get('canny_high', cv_cfg.canny_high),
+                    hough_rho=cv_data.get('hough_rho', cv_cfg.hough_rho),
+                    hough_theta=cv_data.get('hough_theta', cv_cfg.hough_theta),
+                    hough_threshold=cv_data.get('hough_threshold', cv_cfg.hough_threshold),
+                    hough_min_line_len=cv_data.get('hough_min_line_len', cv_cfg.hough_min_line_len),
+                    hough_max_line_gap=cv_data.get('hough_max_line_gap', cv_cfg.hough_max_line_gap),
+                    smoothing_factor=cv_data.get('smoothing_factor', cv_cfg.smoothing_factor),
+                    min_slope=cv_data.get('min_slope', cv_cfg.min_slope),
+                    roi_bottom_left_x=cv_data.get('roi_bottom_left_x', cv_cfg.roi_bottom_left_x),
+                    roi_top_left_x=cv_data.get('roi_top_left_x', cv_cfg.roi_top_left_x),
+                    roi_top_right_x=cv_data.get('roi_top_right_x', cv_cfg.roi_top_right_x),
+                    roi_bottom_right_x=cv_data.get('roi_bottom_right_x', cv_cfg.roi_bottom_right_x),
+                    roi_top_y=cv_data.get('roi_top_y', cv_cfg.roi_top_y),
+                )
+
+            # Parse DL detector config
+            dl_cfg = DLDetectorConfig()
+            if 'dl_detector' in data:
+                dl_data = data['dl_detector']
+
+                # Convert input_size list to tuple if needed
+                input_size = dl_data.get('input_size', dl_cfg.input_size)
+                if isinstance(input_size, list):
+                    input_size = tuple(input_size)
+
+                dl_cfg = DLDetectorConfig(
+                    model_type=dl_data.get('model_type', dl_cfg.model_type),
+                    input_size=input_size,
+                    threshold=dl_data.get('threshold', dl_cfg.threshold),
+                    device=dl_data.get('device', dl_cfg.device),
+                )
 
             # Parse analyzer config
             analyzer_cfg = AnalyzerConfig()
@@ -248,6 +280,7 @@ class ConfigManager:
                     drift_threshold=ana_data.get('drift_threshold', analyzer_cfg.drift_threshold),
                     departure_threshold=ana_data.get('departure_threshold', analyzer_cfg.departure_threshold),
                     lane_width_meters=ana_data.get('lane_width_meters', analyzer_cfg.lane_width_meters),
+                    max_heading_degrees=ana_data.get('max_heading_degrees', analyzer_cfg.max_heading_degrees),
                 )
 
             # Parse controller config
@@ -270,14 +303,48 @@ class ConfigManager:
                     steer_max=throttle_data.get('steer_max', throttle_cfg.steer_max),
                 )
 
+            # Parse visualization config
+            viz_cfg = VisualizationConfig()
+            if 'visualization' in data:
+                viz_data = data['visualization']
+
+                # Parse colors if present (convert list to tuple)
+                def parse_color(color_val, default):
+                    if isinstance(color_val, list):
+                        return tuple(color_val)
+                    return default
+
+                viz_cfg = VisualizationConfig(
+                    show_spectator_overlay=viz_data.get('show_spectator_overlay', viz_cfg.show_spectator_overlay),
+                    follow_with_spectator=viz_data.get('follow_with_spectator', viz_cfg.follow_with_spectator),
+                    alert_blink_frequency=viz_data.get('alert_blink_frequency', viz_cfg.alert_blink_frequency),
+                    color_left_lane=parse_color(viz_data.get('color_left_lane'), viz_cfg.color_left_lane),
+                    color_right_lane=parse_color(viz_data.get('color_right_lane'), viz_cfg.color_right_lane),
+                    color_lane_fill=parse_color(viz_data.get('color_lane_fill'), viz_cfg.color_lane_fill),
+                    color_centered=parse_color(viz_data.get('color_centered'), viz_cfg.color_centered),
+                    color_drift=parse_color(viz_data.get('color_drift'), viz_cfg.color_drift),
+                    color_departure=parse_color(viz_data.get('color_departure'), viz_cfg.color_departure),
+                    hud_font_scale=viz_data.get('hud_font_scale', viz_cfg.hud_font_scale),
+                    hud_thickness=viz_data.get('hud_thickness', viz_cfg.hud_thickness),
+                    hud_margin=viz_data.get('hud_margin', viz_cfg.hud_margin),
+                )
+
+            # Parse detection method from system section
+            detection_method = "cv"
+            if 'system' in data:
+                detection_method = data['system'].get('detection_method', 'cv')
+
             # Create config object
             config = Config(
                 carla=carla_cfg,
                 camera=camera_cfg,
                 cv_detector=cv_cfg,
+                dl_detector=dl_cfg,
                 analyzer=analyzer_cfg,
                 controller=controller_cfg,
                 throttle_policy=throttle_cfg,
+                visualization=viz_cfg,
+                detection_method=detection_method,
             )
 
             return config
@@ -300,6 +367,10 @@ class ConfigManager:
             True if successful
         """
         try:
+            # Convert position and rotation tuples to dict format
+            position = config.camera.position
+            rotation = config.camera.rotation
+
             data = {
                 'carla': {
                     'host': config.carla.host,
@@ -311,16 +382,69 @@ class ConfigManager:
                     'width': config.camera.width,
                     'height': config.camera.height,
                     'fov': config.camera.fov,
-                    'position': list(config.camera.position),
-                    'rotation': list(config.camera.rotation),
+                    'position': {
+                        'x': position[0],
+                        'y': position[1],
+                        'z': position[2],
+                    },
+                    'rotation': {
+                        'pitch': rotation[0],
+                        'yaw': rotation[1],
+                        'roll': rotation[2],
+                    },
                 },
-                'lane_detection': {
-                    'method': config.detection_method,
+                'cv_detector': {
+                    'canny_low': config.cv_detector.canny_low,
+                    'canny_high': config.cv_detector.canny_high,
+                    'hough_rho': config.cv_detector.hough_rho,
+                    'hough_theta': config.cv_detector.hough_theta,
+                    'hough_threshold': config.cv_detector.hough_threshold,
+                    'hough_min_line_len': config.cv_detector.hough_min_line_len,
+                    'hough_max_line_gap': config.cv_detector.hough_max_line_gap,
+                    'smoothing_factor': config.cv_detector.smoothing_factor,
+                    'min_slope': config.cv_detector.min_slope,
+                    'roi_bottom_left_x': config.cv_detector.roi_bottom_left_x,
+                    'roi_top_left_x': config.cv_detector.roi_top_left_x,
+                    'roi_top_right_x': config.cv_detector.roi_top_right_x,
+                    'roi_bottom_right_x': config.cv_detector.roi_bottom_right_x,
+                    'roi_top_y': config.cv_detector.roi_top_y,
                 },
-                'lane_analysis': {
+                'dl_detector': {
+                    'model_type': config.dl_detector.model_type,
+                    'input_size': list(config.dl_detector.input_size),
+                    'threshold': config.dl_detector.threshold,
+                    'device': config.dl_detector.device,
+                },
+                'lane_analyzer': {
                     'drift_threshold': config.analyzer.drift_threshold,
                     'departure_threshold': config.analyzer.departure_threshold,
                     'lane_width_meters': config.analyzer.lane_width_meters,
+                    'max_heading_degrees': config.analyzer.max_heading_degrees,
+                    'kp': config.controller.kp,
+                    'kd': config.controller.kd,
+                },
+                'throttle_policy': {
+                    'base': config.throttle_policy.base,
+                    'min': config.throttle_policy.min,
+                    'steer_threshold': config.throttle_policy.steer_threshold,
+                    'steer_max': config.throttle_policy.steer_max,
+                },
+                'visualization': {
+                    'show_spectator_overlay': config.visualization.show_spectator_overlay,
+                    'follow_with_spectator': config.visualization.follow_with_spectator,
+                    'alert_blink_frequency': config.visualization.alert_blink_frequency,
+                    'color_left_lane': list(config.visualization.color_left_lane),
+                    'color_right_lane': list(config.visualization.color_right_lane),
+                    'color_lane_fill': list(config.visualization.color_lane_fill),
+                    'color_centered': list(config.visualization.color_centered),
+                    'color_drift': list(config.visualization.color_drift),
+                    'color_departure': list(config.visualization.color_departure),
+                    'hud_font_scale': config.visualization.hud_font_scale,
+                    'hud_thickness': config.visualization.hud_thickness,
+                    'hud_margin': config.visualization.hud_margin,
+                },
+                'system': {
+                    'detection_method': config.detection_method,
                 },
             }
 

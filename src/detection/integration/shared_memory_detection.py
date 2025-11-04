@@ -45,7 +45,7 @@ from typing import Optional, Callable
 from multiprocessing import shared_memory, Lock, Value
 import struct
 
-from simulation.integration.messages import ImageMessage, DetectionMessage, LaneMessage
+from detection.integration.messages import ImageMessage, DetectionMessage, LaneMessage
 
 
 # =============================================================================
