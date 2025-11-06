@@ -90,14 +90,6 @@ def parse_arguments() -> argparse.Namespace:
         help="Enable latency tracking and reporting (adds overhead)",
     )
 
-    # Decision mode
-    parser.add_argument(
-        "--decision-mode",
-        type=str,
-        choices=["internal", "external"],
-        default="external",
-        help="Decision mode: 'internal' (in-process) or 'external' (via LKAS decision server) (default: external)",
-    )
     parser.add_argument(
         "--control-shm-name",
         type=str,
@@ -140,16 +132,11 @@ def print_banner(config: SimulationConfig, system_config: object):
     print("=" * 60)
     print(f"CARLA Server: {config.carla_host}:{config.carla_port}")
 
-    # Detection mode (shared memory only)
-    print(f"Detection Mode: SHARED MEMORY (ultra-low latency)")
-    print(f"  Image output: {config.image_shm_name}")
-    print(f"  Detection input: {config.detection_shm_name}")
+    print(f"SHARED MEMORY TABLE")
+    print(f"  Image: {config.image_shm_name}")
+    print(f"  Detection: {config.detection_shm_name}")
+    print(f"  Control: {config.control_shm_name}")
     print(f"  Timeout: {config.detector_timeout}ms")
-
-    # Decision mode
-    print(f"Decision Mode: {config.decision_mode.upper()}")
-    if config.decision_mode == "external":
-        print(f"  Control input: {config.control_shm_name}")
 
     print(f"Camera: {system_config.camera.width}x{system_config.camera.height}")
 
@@ -194,7 +181,6 @@ def main():
         base_throttle=args.base_throttle,
         warmup_frames=args.warmup_frames,
         enable_latency_tracking=args.latency,
-        decision_mode=args.decision_mode,
         control_shm_name=args.control_shm_name,
     )
 

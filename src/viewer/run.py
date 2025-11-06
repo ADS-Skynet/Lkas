@@ -106,6 +106,10 @@ class ZMQWebViewer:
     def _on_frame_received(self, image: np.ndarray, metadata: Dict):
         """Called when new frame received from vehicle."""
         self.latest_frame = image
+        # Debug: print first time we receive a frame
+        if not hasattr(self, '_frame_received_logged'):
+            print(f"[Viewer] First frame received: shape={image.shape}, dtype={image.dtype}")
+            self._frame_received_logged = True
 
         # Render frame with overlays (on laptop, not vehicle!)
         self._render_frame()
@@ -129,6 +133,11 @@ class ZMQWebViewer:
         """
         if self.latest_frame is None:
             return
+
+        # Debug: log first render
+        if not hasattr(self, '_render_logged'):
+            print(f"[Viewer] First render: frame shape={self.latest_frame.shape}")
+            self._render_logged = True
 
         # Start with original frame
         output = self.latest_frame.copy()
@@ -189,6 +198,11 @@ class ZMQWebViewer:
         # Store rendered frame
         self.rendered_frame = output
 
+        # Debug: log first stored frame
+        if not hasattr(self, '_stored_logged'):
+            print(f"[Viewer] First rendered frame stored: shape={output.shape}")
+            self._stored_logged = True
+
     def _zmq_poll_loop(self):
         """ZMQ polling loop (runs in separate thread)."""
         print("[ZMQ] Polling loop started")
@@ -202,12 +216,16 @@ class ZMQWebViewer:
 
     def _start_http_server(self):
         """Start HTTP server for web interface."""
+        print("[DEBUG] _start_http_server() called")
         viewer_self = self
 
         class ViewerRequestHandler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
-                # Suppress HTTP logs
-                pass
+                # Log important messages only
+                message = format % args
+                if "code 404" in message or "code 500" in message or "error" in message.lower():
+                    print(f"[HTTP] {message}")
+                # Suppress routine logs (200, 204)
 
             def do_POST(self):
                 """Handle POST requests for actions."""
@@ -221,6 +239,7 @@ class ZMQWebViewer:
                         print(f"[Action] Browser requested: {action}")
 
                         # Send action to vehicle via ZMQ
+                        # The viewer will update its footer when it receives the state update from simulation
                         viewer_self.action_publisher.send_action(action)
 
                         # Send success response
@@ -241,25 +260,33 @@ class ZMQWebViewer:
                     self.send_error(404)
 
             def do_GET(self):
+                print(f"[HTTP] GET request: {self.path}")
+
                 if self.path == '/':
                     # Serve HTML page
+                    print("[HTTP] Serving HTML page")
                     self.send_response(200)
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
                     html = self._get_html()
                     self.wfile.write(html.encode())
+                    print("[HTTP] HTML page sent")
 
                 elif self.path == '/stream':
                     # Serve MJPEG stream
+                    print("[HTTP] Client connected to /stream")
                     self.send_response(200)
                     self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=--jpgboundary')
                     self.send_header('Cache-Control', 'no-cache, private')
                     self.send_header('Pragma', 'no-cache')
                     self.end_headers()
 
+                    frame_count = 0
                     try:
                         while viewer_self.running:
                             if viewer_self.rendered_frame is not None:
+                                frame_count += 1
+
                                 # Encode frame as JPEG
                                 success, buffer = cv2.imencode('.jpg', viewer_self.rendered_frame,
                                                                [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -272,15 +299,41 @@ class ZMQWebViewer:
                                     self.wfile.write(f'Content-Length: {len(frame_bytes)}\r\n\r\n'.encode())
                                     self.wfile.write(frame_bytes)
                                     self.wfile.write(b'\r\n')
+                                else:
+                                    print(f"[HTTP] Failed to encode frame!")
+                            else:
+                                if frame_count == 0:
+                                    time.sleep(1)
+                                    continue
 
                             time.sleep(0.033)  # ~30 FPS
                     except Exception as e:
                         print(f"[HTTP] Stream ended: {e}")
 
+                elif self.path == '/status':
+                    # Status endpoint - returns current pause state
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    status = {
+                        'paused': viewer_self.subscriber.paused,
+                        'state_received': viewer_self.subscriber.state_received
+                    }
+                    self.wfile.write(json.dumps(status).encode())
+
+                elif self.path == '/health':
+                    # Health check endpoint
+                    print("[HTTP] Health check requested")
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(b'OK\n')
+
                 elif self.path == '/favicon.ico':
                     self.send_response(204)
                     self.end_headers()
                 else:
+                    print(f"[HTTP] 404 - Path not found: {self.path}")
                     self.send_error(404)
 
             def _get_html(self):
@@ -423,6 +476,33 @@ class ZMQWebViewer:
                     <script>
                         let isPaused = false;
 
+                        function updateButtonState(paused) {{
+                            isPaused = paused;
+                            const btn = document.getElementById('pauseBtn');
+                            if (isPaused) {{
+                                btn.textContent = '▶️ Resume';
+                                btn.classList.add('primary');
+                                btn.classList.remove('warning');
+                            }} else {{
+                                btn.textContent = '⏸ Pause';
+                                btn.classList.remove('primary');
+                                btn.classList.add('warning');
+                            }}
+                        }}
+
+                        function checkStatus() {{
+                            fetch('/status')
+                                .then(response => response.json())
+                                .then(data => {{
+                                    if (data.state_received) {{
+                                        updateButtonState(data.paused);
+                                    }}
+                                }})
+                                .catch(error => {{
+                                    console.error('Status check failed:', error);
+                                }});
+                        }}
+
                         function sendAction(action) {{
                             fetch('/action', {{
                                 method: 'POST',
@@ -445,19 +525,8 @@ class ZMQWebViewer:
                         }}
 
                         function togglePause() {{
-                            isPaused = !isPaused;
-                            sendAction(isPaused ? 'pause' : 'resume');
-
-                            const btn = document.getElementById('pauseBtn');
-                            if (isPaused) {{
-                                btn.textContent = '▶️ Resume';
-                                btn.classList.add('primary');
-                                btn.classList.remove('warning');
-                            }} else {{
-                                btn.textContent = '⏸ Pause';
-                                btn.classList.remove('primary');
-                                btn.classList.add('warning');
-                            }}
+                            // Send the opposite action based on current state
+                            sendAction(isPaused ? 'resume' : 'pause');
                         }}
 
                         function showNotification(message, isError = false) {{
@@ -480,17 +549,52 @@ class ZMQWebViewer:
                                 togglePause();
                             }}
                         }});
+
+                        // Check status on page load
+                        checkStatus();
+
+                        // Poll status every 2 seconds to keep button in sync
+                        setInterval(checkStatus, 2000);
                     </script>
                 </body>
                 </html>
                 """
 
-        # Start HTTP server
-        self.http_server = ThreadingHTTPServer(('', self.web_port), ViewerRequestHandler)
-        self.http_thread = Thread(target=self.http_server.serve_forever, daemon=True)
-        self.http_thread.start()
+        # Start HTTP server with error handling wrapper
+        def serve_with_error_handling():
+            try:
+                print("[HTTP] Server thread starting serve_forever()")
+                self.http_server.serve_forever()
+            except Exception as e:
+                print(f"[HTTP] Server thread crashed: {e}")
+                import traceback
+                traceback.print_exc()
 
-        print(f"✓ HTTP server started on port {self.web_port}")
+        try:
+            print(f"[HTTP] Creating server on port {self.web_port}")
+            self.http_server = ThreadingHTTPServer(('0.0.0.0', self.web_port), ViewerRequestHandler)
+            print(f"[HTTP] Server created, starting thread")
+            self.http_thread = Thread(target=serve_with_error_handling, daemon=True)
+            self.http_thread.start()
+
+            # Give server a moment to start
+            time.sleep(0.2)
+
+            # Verify thread is still running
+            if self.http_thread.is_alive():
+                print(f"✓ HTTP server started on port {self.web_port}")
+                print(f"  Server listening on: http://0.0.0.0:{self.web_port}")
+                print(f"  Local access: http://localhost:{self.web_port}")
+                print(f"  Remote access (via VSCode): http://localhost:{self.web_port}")
+                print(f"")
+                print(f"  💡 TIP: If accessing from laptop, ensure port {self.web_port} is")
+                print(f"          forwarded in VSCode's 'Ports' tab!")
+            else:
+                print(f"✗ HTTP server thread died immediately!")
+        except Exception as e:
+            print(f"✗ Failed to start HTTP server: {e}")
+            import traceback
+            traceback.print_exc()
 
     def stop(self):
         """Stop viewer."""

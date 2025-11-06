@@ -97,7 +97,7 @@ class LKAS:
         """
         self._detection_client.send_image(image, timestamp, frame_id)
 
-    def get_detection(self, timeout: float = 1.0) -> Optional[DetectionMessage]:
+    def get_detection(self, timeout: float = 1.0) -> DetectionMessage | None:
         """
         Get lane detection result (optional, for debugging/visualization).
 
@@ -109,7 +109,7 @@ class LKAS:
         """
         return self._detection_client.get_detection(timeout)
 
-    def get_control(self, timeout: float = 1.0) -> Optional[ControlMessage]:
+    def get_control(self, timeout: float = 1.0) -> ControlMessage | None:
         """
         Get control command from LKAS system.
 
@@ -167,7 +167,7 @@ class LKASSimple:
         """Send image to LKAS."""
         self._lkas.send_image(image, timestamp, frame_id)
 
-    def receive(self, timeout: float = 1.0) -> Optional[ControlMessage]:
+    def receive(self, timeout: float = 1.0) -> ControlMessage | None:
         """Receive control from LKAS."""
         return self._lkas.get_control(timeout)
 

@@ -25,6 +25,9 @@ import cv2
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any, Callable
 from threading import Thread
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
 
 
 @dataclass
@@ -55,6 +58,7 @@ class VehicleState:
     speed_kmh: float
     position: Optional[tuple] = None  # (x, y, z)
     rotation: Optional[tuple] = None  # (pitch, yaw, roll)
+    paused: Optional[bool] = None  # Simulation paused state
 
 
 class VehicleBroadcaster:
@@ -206,6 +210,78 @@ class ViewerSubscriber:
         # Stats
         self.frame_count = 0
         self.last_print_time = time.time()
+        self.current_fps = 0.0
+        self.current_frame_id = 0
+        self.paused = False
+        self.state_received = False  # Track if we've received any state yet
+
+        # Rich console for footer
+        self.console = Console()
+        self.live_display: Optional[Live] = None
+
+        # Initialize footer immediately
+        self._init_footer()
+
+    def _init_footer(self):
+        """Initialize rich live footer display."""
+        if self.live_display is None:
+            # Create live display with auto-refresh
+            self.live_display = Live(
+                self._generate_footer_table(),
+                console=self.console,
+                refresh_per_second=2,
+                vertical_overflow="visible"
+            )
+            self.live_display.start()
+
+    def _generate_footer_table(self) -> Table:
+        """Generate footer display as a rich Table."""
+        table = Table.grid(padding=(0, 1))
+        table.add_column(style="cyan", no_wrap=True)
+
+        if not self.state_received:
+            # Initial state - waiting for first state from simulation
+            table.add_row(
+                f"[bold dim]○ Waiting for stream...[/bold dim]",
+            )
+        elif self.paused:
+            # Simulation is paused
+            table.add_row(
+                f"[bold yellow]■ PAUSED[/bold yellow]",
+            )
+        else:
+            # Simulation is running
+            table.add_row(
+                f"[bold green]● LIVE[/bold green] [bold cyan]{self.current_fps:.1f} FPS[/bold cyan]",
+            )
+
+        return table
+
+    def _update_footer(self, fps: float, frame_id: int):
+        """Update footer with new stats."""
+        self.current_fps = fps
+        self.current_frame_id = frame_id
+
+        if self.live_display is not None:
+            self.live_display.update(self._generate_footer_table())
+
+    def set_paused(self, paused: bool):
+        """Set pause status and update footer immediately."""
+        self.paused = paused
+        if self.live_display is not None:
+            self.live_display.update(self._generate_footer_table())
+
+    def _clear_footer(self):
+        """Stop and clear the footer display."""
+        if self.live_display is not None:
+            try:
+                self.live_display.stop()
+            except Exception:
+                pass
+            finally:
+                self.live_display = None
+                # Print newline to ensure clean terminal state
+                print()
 
     def register_frame_callback(self, callback: Callable[[np.ndarray, Dict], None]):
         """Register callback for frame updates."""
@@ -244,11 +320,14 @@ class ViewerSubscriber:
                 self.latest_frame = image_rgb
                 self.frame_count += 1
 
-                # Print stats
-                if time.time() - self.last_print_time > 3.0:
-                    fps = self.frame_count / (time.time() - self.last_print_time)
-                    print(f"[Subscriber] Receiving {fps:.1f} FPS | Frame {metadata['frame_id']}", end='\r', flush=True)
-                    print('\n')
+                # Update footer stats
+                if time.time() - self.last_print_time > 0.5:  # Update every 500ms
+                    elapsed = time.time() - self.last_print_time
+                    fps = self.frame_count / elapsed
+
+                    # Update footer with new stats
+                    self._update_footer(fps, metadata['frame_id'])
+
                     self.frame_count = 0
                     self.last_print_time = time.time()
 
@@ -268,6 +347,11 @@ class ViewerSubscriber:
                 data = json.loads(parts[1].decode('utf-8'))
                 state = VehicleState(**data)
                 self.latest_state = state
+                self.state_received = True
+
+                # Update pause state from vehicle if provided
+                if state.paused is not None and state.paused != self.paused:
+                    self.set_paused(state.paused)
 
                 if self.state_callback:
                     self.state_callback(state)
@@ -290,9 +374,19 @@ class ViewerSubscriber:
                 time.sleep(0.001)  # Small sleep to prevent busy-wait
         except KeyboardInterrupt:
             print("\nStopping subscriber...")
+        finally:
+            self._clear_footer()
 
     def close(self):
         """Close subscriber."""
+        # Ensure footer is cleared before closing
+        if self.live_display is not None:
+            try:
+                self.live_display.stop()
+                self.live_display = None
+            except Exception:
+                pass
+
         self.socket.close()
         self.context.term()
         print("✓ Viewer subscriber stopped")

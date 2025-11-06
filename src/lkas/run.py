@@ -65,7 +65,8 @@ class LKASLauncher:
         self.running = False
 
         # Terminal display with persistent footer
-        self.terminal = TerminalDisplay(enable_footer=True)
+        self.enable_footer = True
+        self.terminal = TerminalDisplay(enable_footer=self.enable_footer)
         self.detection_logger = OrderedLogger("[Detector]", self.terminal)
         self.decision_logger = OrderedLogger("[Controller]", self.terminal)
 
@@ -163,13 +164,17 @@ class LKASLauncher:
                 if line:
                     line = line.decode('utf-8').rstrip()
                     if line:  # Only print non-empty lines
-                        # Check if this is a stats line (starts with \r)
-                        if line.startswith('\r') or 'FPS' in line:
-                            # Update stats tracking
+                        # Check if this is a stats line (starts with \r or contains FPS)
+                        # Stats lines format: "\r45.2 FPS | Frame 1234 | ..."
+                        is_stats = line.startswith('\r') or ('FPS' in line and '|' in line)
+
+                        if is_stats:
+                            # Update stats tracking - strip \r and whitespace
+                            stats_text = line.lstrip('\r').strip()
                             if prefix == "DETECTION":
-                                self.last_detection_stats = line.lstrip('\r')
+                                self.last_detection_stats = stats_text
                             else:
-                                self.last_decision_stats = line.lstrip('\r')
+                                self.last_decision_stats = stats_text
                             self._update_footer()
                         else:
                             # Regular message - buffer or print depending on mode
@@ -193,11 +198,14 @@ class LKASLauncher:
                 if line:
                     line = line.decode('utf-8').rstrip()
                     if line:
-                        if line.startswith('\r') or 'FPS' in line:
+                        is_stats = line.startswith('\r') or ('FPS' in line and '|' in line)
+
+                        if is_stats:
+                            stats_text = line.lstrip('\r').strip()
                             if prefix == "DETECTION":
-                                self.last_detection_stats = line.lstrip('\r')
+                                self.last_detection_stats = stats_text
                             else:
-                                self.last_decision_stats = line.lstrip('\r')
+                                self.last_decision_stats = stats_text
                             self._update_footer()
                         else:
                             # Regular message - buffer or print depending on mode
@@ -213,17 +221,23 @@ class LKASLauncher:
 
     def _update_footer(self):
         """Update the persistent footer with latest stats from both processes."""
+        if not self.enable_footer:
+            return
+
         parts = []
 
         if self.last_detection_stats:
-            parts.append(f"[DET] {self.last_detection_stats}")
+            parts.append(f"[Detector] {self.last_detection_stats}")
 
         if self.last_decision_stats:
-            parts.append(f"[DEC] {self.last_decision_stats}")
+            parts.append(f"[Controller] {self.last_decision_stats}")
 
         if parts:
             footer_text = " | ".join(parts)
             self.terminal.update_footer(footer_text)
+        else:
+            # If no stats yet, show waiting message
+            self.terminal.update_footer("Waiting for stats...")
 
     def run(self):
         """Start both servers and manage their lifecycle."""
@@ -231,12 +245,12 @@ class LKASLauncher:
 
         # Open log file
         self.log_file = open("lkas_run.log", "w", buffering=1)
-        self.terminal.print("[LKAS] Logging output to lkas_run.log")
+        self.terminal.print("Logging output to lkas_run.log")
 
         # Register signal handlers for graceful shutdown
         def signal_handler(sig, frame):
             self.terminal.clear_footer()
-            self.terminal.print("\n[LKAS] Received interrupt signal - shutting down...")
+            self.terminal.print("\nReceived interrupt signal - shutting down...")
             if hasattr(self, 'log_file') and self.log_file:
                 self.log_file.close()
             self.stop()
@@ -247,7 +261,7 @@ class LKASLauncher:
 
         try:
             # Start detection server
-            self.terminal.print("[LKAS] Starting detection server...")
+            self.terminal.print("Starting detection server...")
             detection_cmd = self._build_detection_cmd()
             self.detection_process = subprocess.Popen(
                 detection_cmd,
@@ -259,7 +273,7 @@ class LKASLauncher:
             if self.detection_process.stdout:
                 flags = fcntl.fcntl(self.detection_process.stdout, fcntl.F_GETFL)
                 fcntl.fcntl(self.detection_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-            self.terminal.print(f"[LKAS] ✓ Detection server started (PID: {self.detection_process.pid})")
+            self.terminal.print(f"✓ Detection server started (PID: {self.detection_process.pid})")
 
             # Read detection initialization messages (buffered for ordering)
             # Buffer for 4 seconds to capture the initial setup messages
@@ -273,14 +287,14 @@ class LKASLauncher:
 
             # Check if detection server is still running
             if self.detection_process.poll() is not None:
-                self.terminal.print("[LKAS] ✗ Detection server failed to start!")
+                self.terminal.print("✗ Detection server failed to start!")
                 return 1
 
             # Small delay before starting decision server
             time.sleep(0.5)
 
             # Start decision server
-            self.terminal.print("[LKAS] Starting decision server...")
+            self.terminal.print("Starting decision server...")
             decision_cmd = self._build_decision_cmd()
             self.decision_process = subprocess.Popen(
                 decision_cmd,
@@ -292,7 +306,7 @@ class LKASLauncher:
             if self.decision_process.stdout:
                 flags = fcntl.fcntl(self.decision_process.stdout, fcntl.F_GETFL)
                 fcntl.fcntl(self.decision_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-            self.terminal.print(f"[LKAS] ✓ Decision server started (PID: {self.decision_process.pid})")
+            self.terminal.print(f"✓ Decision server started (PID: {self.decision_process.pid})")
 
             # Read decision initialization messages (buffered for ordering)
             # Buffer for 3 seconds to capture the initial setup messages
@@ -306,7 +320,7 @@ class LKASLauncher:
 
             # Check if decision server is still running
             if self.decision_process.poll() is not None:
-                self.terminal.print("[LKAS] ✗ Decision server failed to start!")
+                self.terminal.print("✗ Decision server failed to start!")
                 self.stop()
                 return 1
 
@@ -314,14 +328,17 @@ class LKASLauncher:
             self.buffering_mode = False
 
             self.terminal.print("\n" + "=" * 70)
-            self.terminal.print("[LKAS] System running - Press Ctrl+C to stop")
-            self.terminal.print("[LKAS]")
-            self.terminal.print("[LKAS] Servers will wait up to 30 seconds for connections:")
-            self.terminal.print("[LKAS]   - Detection server waiting for camera_feed from simulation")
-            self.terminal.print("[LKAS]   - Decision server waiting for detection_results from detection")
-            self.terminal.print("[LKAS]")
-            self.terminal.print("[LKAS] Ready! Start 'simulation' in another terminal to begin processing")
+            self.terminal.print("System running - Press Ctrl+C to stop")
+            self.terminal.print("")
+            self.terminal.print("Servers will wait up to 30 seconds for connections:")
+            self.terminal.print("  - Detection server waiting for camera_feed from simulation")
+            self.terminal.print("  - Decision server waiting for detection_results from detection")
+            self.terminal.print("")
+            self.terminal.print("Ready! Start 'simulation' in another terminal to begin processing")
             self.terminal.print("=" * 70 + "\n")
+
+            # Initialize footer
+            self._update_footer()
 
             self.running = True
 
@@ -340,18 +357,18 @@ class LKASLauncher:
                     for _ in range(10):
                         self._read_process_output(self.detection_process, "DETECTION", self.detection_logger)
                     self.terminal.clear_footer()
-                    self.terminal.print("[LKAS] ✗ Detection server died unexpectedly!")
+                    self.terminal.print("✗ Detection server died unexpectedly!")
                     self.running = False
                     break
 
                 if not decision_alive:
                     # Try to read remaining output before reporting death
                     self.terminal.clear_footer()
-                    self.terminal.print("[LKAS] Decision server process ended, reading final output...")
+                    self.terminal.print("Decision server process ended, reading final output...")
                     time.sleep(0.1)  # Give output a moment to flush
                     for _ in range(20):
                         self._read_process_output(self.decision_process, "DECISION ", self.decision_logger)
-                    self.terminal.print("[LKAS] ✗ Decision server died unexpectedly!")
+                    self.terminal.print("✗ Decision server died unexpectedly!")
                     self.running = False
                     break
 
@@ -360,7 +377,7 @@ class LKASLauncher:
 
         except Exception as e:
             self.terminal.clear_footer()
-            self.terminal.print(f"[LKAS] ✗ Error: {e}")
+            self.terminal.print(f"✗ Error: {e}")
             return 1
         finally:
             self.terminal.clear_footer()
@@ -374,33 +391,33 @@ class LKASLauncher:
         """Stop both servers gracefully."""
         self.running = False
 
-        self.terminal.print("\n[LKAS] Stopping servers...")
+        self.terminal.print("\nStopping servers...")
 
         # Stop decision server first (consumer)
         if self.decision_process and self.decision_process.poll() is None:
-            self.terminal.print("[LKAS] Stopping decision server...")
+            self.terminal.print("Stopping decision server...")
             self.decision_process.terminate()
             try:
                 self.decision_process.wait(timeout=5.0)
-                self.terminal.print("[LKAS] ✓ Decision server stopped")
+                self.terminal.print("✓ Decision server stopped")
             except subprocess.TimeoutExpired:
-                self.terminal.print("[LKAS] ! Decision server not responding, killing...")
+                self.terminal.print("! Decision server not responding, killing...")
                 self.decision_process.kill()
                 self.decision_process.wait()
 
         # Then stop detection server (producer)
         if self.detection_process and self.detection_process.poll() is None:
-            self.terminal.print("[LKAS] Stopping detection server...")
+            self.terminal.print("Stopping detection server...")
             self.detection_process.terminate()
             try:
                 self.detection_process.wait(timeout=5.0)
-                self.terminal.print("[LKAS] ✓ Detection server stopped")
+                self.terminal.print("✓ Detection server stopped")
             except subprocess.TimeoutExpired:
-                self.terminal.print("[LKAS] ! Detection server not responding, killing...")
+                self.terminal.print("! Detection server not responding, killing...")
                 self.detection_process.kill()
                 self.detection_process.wait()
 
-        self.terminal.print("[LKAS] ✓ Cleanup complete")
+        self.terminal.print("✓ Cleanup complete")
 
 
 def main():
