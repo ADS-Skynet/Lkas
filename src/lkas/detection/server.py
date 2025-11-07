@@ -46,6 +46,7 @@ class DetectionServer:
         retry_delay: float = 0.5,
         enable_parameter_updates: bool = True,
         parameter_broker_url: str = "tcp://localhost:5560",
+        defer_image_connection: bool = False,
     ):
         """
         Initialize detection server.
@@ -59,6 +60,7 @@ class DetectionServer:
             retry_delay: Delay between retries (seconds)
             enable_parameter_updates: Enable real-time parameter updates via ZMQ
             parameter_broker_url: ZMQ URL for parameter broker
+            defer_image_connection: If True, don't connect to image input yet (call connect_to_image_input() later)
         """
         print("\n" + "=" * 60)
         print("Detection Server")
@@ -67,6 +69,12 @@ class DetectionServer:
         # Initialize attributes to None for safe cleanup
         self.image_channel = None
         self.detection_channel = None
+
+        # Store config for deferred image connection
+        self.config = config
+        self.image_shm_name = image_shm_name
+        self.retry_count = retry_count
+        self.retry_delay = retry_delay
 
         try:
             # 1. Initialize detector (core logic)
@@ -86,15 +94,10 @@ class DetectionServer:
             print(f"✓ Created detection output")
 
             # 3. Connect to image input (wait for simulation)
-            print(f"\nConnecting to image shared memory '{image_shm_name}'...")
-            self.image_channel = SharedMemoryImageChannel(
-                name=image_shm_name,
-                shape=(config.camera.height, config.camera.width, 3),
-                create=False,  # Reader mode
-                retry_count=retry_count,
-                retry_delay=retry_delay,
-            )
-            print(f"✓ Connected to image input")
+            if not defer_image_connection:
+                self._connect_to_image_input()
+            else:
+                print(f"\n⏸ Deferring image input connection (call connect_to_image_input() later)")
 
             # Server state
             self.running = False
@@ -122,6 +125,28 @@ class DetectionServer:
             self._cleanup_on_error()
             raise
 
+    def _connect_to_image_input(self):
+        """Internal method to connect to image input."""
+        print(f"\nConnecting to image shared memory '{self.image_shm_name}'...")
+        self.image_channel = SharedMemoryImageChannel(
+            name=self.image_shm_name,
+            shape=(self.config.camera.height, self.config.camera.width, 3),
+            create=False,  # Reader mode
+            retry_count=self.retry_count,
+            retry_delay=self.retry_delay,
+        )
+        print(f"✓ Connected to image input")
+
+    def connect_to_image_input(self):
+        """
+        Connect to image input (for deferred connection).
+        Call this after decision server is ready.
+        """
+        if self.image_channel is not None:
+            print("⚠ Image input already connected")
+            return
+        self._connect_to_image_input()
+
     def process_image(self, image_msg: ImageMessage) -> DetectionMessage:
         """
         Process one image through the detector.
@@ -147,12 +172,12 @@ class DetectionServer:
 
         if hasattr(detector_impl, 'update_parameter'):
             success = detector_impl.update_parameter(param_name, value)
-            if success:
-                print(f"[Detection] Parameter updated: {param_name} = {value}")
-            else:
-                print(f"[Detection] Failed to update parameter: {param_name}")
-        else:
-            print(f"[Detection] Detector does not support parameter updates")
+        #     if success:
+        #         print(f"[Detection] Parameter updated: {param_name} = {value}")
+        #     else:
+        #         print(f"[Detection] Failed to update parameter: {param_name}")
+        # else:
+        #     print(f"[Detection] Detector does not support parameter updates")
 
     def run(self, print_stats: bool = True):
         """

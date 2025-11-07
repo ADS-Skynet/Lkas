@@ -246,14 +246,14 @@ class SharedMemoryControlChannel:
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
-                        print(
-                            f"  Waiting for control shared memory '{name}' "
-                            f"(attempt {attempt + 1}/{retry_count})...",
-                            end='\r', flush=True
-                        )
+                        # print(
+                        #     f"  Waiting for control shared memory '{name}' "
+                        #     f"(attempt {attempt + 1}/{retry_count})...",
+                        #     end='\r', flush=True
+                        # )
                         time.sleep(retry_delay)
                     else:
-                        print()  # Clear the retry line
+                        print(flush=True)  # Clear the retry line
                         raise ConnectionError(
                             f"Control shared memory '{name}' not found after {retry_count} attempts. "
                             f"Make sure the decision server is running."

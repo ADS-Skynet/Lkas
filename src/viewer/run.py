@@ -41,7 +41,8 @@ class ZMQWebViewer:
                  vehicle_url: str = "tcp://localhost:5557",
                  action_url: str = "tcp://localhost:5558",
                  parameter_bind_url: str = "tcp://*:5559",
-                 web_port: int = 8080):
+                 web_port: int = 8080,
+                 verbose: bool = False):
         """
         Initialize ZMQ web viewer.
 
@@ -50,11 +51,13 @@ class ZMQWebViewer:
             action_url: ZMQ URL to send actions to vehicle
             parameter_bind_url: ZMQ URL to bind for parameter updates (acts as server)
             web_port: HTTP port for web interface
+            verbose: Enable verbose HTTP request logging
         """
         self.vehicle_url = vehicle_url
         self.action_url = action_url
         self.parameter_bind_url = parameter_bind_url
         self.web_port = web_port
+        self.verbose = verbose
 
         # ZMQ communication
         self.subscriber = ViewerSubscriber(vehicle_url)
@@ -211,11 +214,35 @@ class ZMQWebViewer:
 
         class ViewerRequestHandler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
-                # Log important messages only
-                message = format % args
-                if "code 404" in message or "code 500" in message or "error" in message.lower():
+                # Custom logging based on verbose flag
+                if viewer_self.verbose:
+                    # Verbose mode: log all requests with details
+                    message = format % args
                     print(f"[HTTP] {message}")
-                # Suppress routine logs (200, 204)
+                else:
+                    # Normal mode: log important messages only
+                    message = format % args
+                    if "code 404" in message or "code 500" in message or "error" in message.lower():
+                        print(f"[HTTP] {message}")
+                    # Suppress routine logs (200, 204)
+
+            def log_request(self, code='-', size='-'):
+                """Log an HTTP request with detailed information in verbose mode."""
+                if viewer_self.verbose:
+                    # Extract client info
+                    client_ip = self.client_address[0]
+                    client_port = self.client_address[1]
+
+                    # Get request details
+                    method = self.command
+                    path = self.path
+                    protocol = self.request_version
+
+                    # Format log message
+                    print(f"[HTTP] {method} {path} {protocol} - Client: {client_ip}:{client_port} - Status: {code} - Size: {size}")
+                else:
+                    # Use default logging (will be filtered by log_message)
+                    super().log_request(code, size)
 
             def do_POST(self):
                 """Handle POST requests for actions and parameters."""
@@ -787,6 +814,8 @@ def main():
                        help="ZMQ URL to send parameter updates")
     parser.add_argument('--port', type=int, default=None,
                        help="HTTP port for web interface (overrides config, default: from config.yaml)")
+    parser.add_argument('--verbose', action='store_true',
+                       help="Enable verbose HTTP request logging")
 
     args = parser.parse_args()
 
@@ -801,7 +830,8 @@ def main():
         vehicle_url=args.vehicle,
         action_url=args.actions,
         parameter_bind_url=args.parameters,
-        web_port=web_port
+        web_port=web_port,
+        verbose=args.verbose
     )
 
     viewer.start()

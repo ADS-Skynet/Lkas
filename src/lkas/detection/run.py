@@ -86,7 +86,7 @@ def main():
     args = parser.parse_args()
 
     # Load configuration
-    print("Loading configuration...")
+    # print("Loading configuration...")
     config = ConfigManager.load(args.config)
     print(f"✓ Configuration loaded")
 

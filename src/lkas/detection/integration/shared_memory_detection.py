@@ -242,10 +242,14 @@ class SharedMemoryImageChannel:
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
-                        print(f"\r  Waiting for shared memory '{name}' (attempt {attempt + 1}/{retry_count})...", end="\r", flush=True)
+                        # print(
+                        #     f"  Waiting for shared memory '{name}' "
+                        #     f"(attempt {attempt + 1}/{retry_count})...",
+                        #     end="\r", flush=True
+                        # )
                         time.sleep(retry_delay)
                     else:
-                        print()  # Clear the retry line
+                        print(flush=True)  # Clear the retry line
                         raise ConnectionError(
                             f"Shared memory '{name}' not found after {retry_count} attempts. "
                             f"Make sure the writer process is running."
@@ -414,14 +418,14 @@ class SharedMemoryDetectionChannel:
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
-                        print(
-                            f"  Waiting for detection shared memory '{name}'"
-                            f"(attempt {attempt + 1}/{retry_count})...",
-                            end="\r", flush=True
-                        )
+                        # print(
+                        #     f"  Waiting for detection shared memory '{name}'"
+                        #     f"(attempt {attempt + 1}/{retry_count})...",
+                        #     end="\r", flush=True
+                        # )
                         time.sleep(retry_delay)
                     else:
-                        print()  # Clear the retry line
+                        print(flush=True)  # Clear the retry line
                         raise ConnectionError(
                             f"Detection shared memory '{name}' not found after {retry_count} attempts. "
                             f"Make sure the detection server is running."

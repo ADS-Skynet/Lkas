@@ -44,7 +44,7 @@ class TerminalDisplay:
         self.detection_connected = False
         self.decision_connected = False
 
-    def print(self, message: str, prefix: str = ""):
+    def print(self, message: str, prefix: str = "", carriage_return: bool = False):
         """
         Print a message to the main content area.
 
@@ -54,8 +54,14 @@ class TerminalDisplay:
         """
         # Just use regular print - Rich Live handles the footer
         if prefix:
+            # if carriage_return:
+            #     print(f"\r{prefix} {message}", end="", flush=True)
+            # else:
             print(f"{prefix} {message}")
         else:
+            # if carriage_return:
+            #     print(f"\r{message}", end="", flush=True)
+            # else:
             print(message)
 
     def init_footer(self):
@@ -183,7 +189,7 @@ class OrderedLogger:
                     print(f"{self.prefix} {msg}")
             self.buffer.clear()
 
-    def print_immediate(self, message: str):
+    def print_immediate(self, message: str, carriage_return: bool = False):
         """
         Print a message immediately without buffering.
 
@@ -191,7 +197,7 @@ class OrderedLogger:
             message: Message to print
         """
         if self.terminal:
-            self.terminal.print(message, self.prefix)
+            self.terminal.print(message, self.prefix, carriage_return)
         else:
             print(f"{self.prefix} {message}")
 

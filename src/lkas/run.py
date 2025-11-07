@@ -24,6 +24,7 @@ import signal
 import time
 import select
 import fcntl
+import re
 from pathlib import Path
 from typing import Optional, List
 
@@ -70,8 +71,8 @@ class LKASLauncher:
         # Terminal display with persistent footer
         self.enable_footer = True
         self.terminal = TerminalDisplay(enable_footer=self.enable_footer)
-        self.detection_logger = OrderedLogger("[DET]", self.terminal)
-        self.decision_logger = OrderedLogger("[CNT]", self.terminal)
+        self.detection_logger = OrderedLogger("[SubProc]", self.terminal)
+        self.decision_logger = OrderedLogger("[SubProc]", self.terminal)
 
         # Connection tracking
         self.detection_connected = False
@@ -79,6 +80,11 @@ class LKASLauncher:
 
         # Initialization phase tracking
         self.buffering_mode = True
+
+        # Progress line tracking (for suppressing intermediate updates)
+        self.last_progress_line = {"DETECTION": None, "DECISION ": None}
+        self.progress_counter = {"DETECTION": 0, "DECISION ": 0}
+        self.last_was_progress = {"DETECTION": False, "DECISION ": False}
 
     def _build_detection_cmd(self) -> List[str]:
         """Build command for detection server."""
@@ -174,31 +180,28 @@ class LKASLauncher:
                 data = process.stdout.read(4096)  # Read up to 4KB
                 if data:
                     lines_raw = data.decode('utf-8')
-                    # Split by both \n and \r, keeping empty strings
-                    lines = lines_raw.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+                    lines = lines_raw.splitlines(keepends=True)
+                    # for line in lines_raw.splitlines(keepends=True):
+                    #     print(repr(line))
 
                     for line in lines:
-                        line = line.strip()
-                        if not line:
+                        stripped = line.strip()
+                        if not stripped:
                             continue
 
                         # Mark as connected when we receive any output
                         if "DETECTION" in prefix and not self.detection_connected:
-                            self.detection_connected = True
                             self._update_footer()
                         elif "DECISION" in prefix and not self.decision_connected:
-                            self.decision_connected = True
                             self._update_footer()
 
                         # Print message (buffer or print depending on mode)
                         if self.buffering_mode:
-                            logger.log(line)
-                        else:
-                            logger.print_immediate(line)
+                            logger.print_immediate(stripped, line.endswith('\r'))
 
                         # Log to file
                         if hasattr(self, 'log_file') and self.log_file:
-                            self.log_file.write(f"[{prefix}] {line}\n")
+                            self.log_file.write(f"[{prefix}] {stripped}\n")
             except BlockingIOError:
                 # No data available - this is OK for non-blocking I/O
                 pass
@@ -211,29 +214,27 @@ class LKASLauncher:
                 data = process.stdout.read(4096)
                 if data:
                     lines_raw = data.decode('utf-8')
-                    lines = lines_raw.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+                    lines = lines_raw.splitlines(keepends=True)
 
                     for line in lines:
-                        line = line.strip()
-                        if not line:
+                        stripped = line.strip()
+                        if not stripped:
                             continue
 
                         # Mark as connected when we receive any output
                         if "DETECTION" in prefix and not self.detection_connected:
-                            self.detection_connected = True
+                            # self.detection_connected = True
                             self._update_footer()
                         elif "DECISION" in prefix and not self.decision_connected:
-                            self.decision_connected = True
+                            # self.decision_connected = True
                             self._update_footer()
 
                         # Print message (buffer or print depending on mode)
                         if self.buffering_mode:
-                            logger.log(line)
-                        else:
-                            logger.print_immediate(line)
+                            logger.print_immediate(stripped, line.endswith('\r'))
 
                         if hasattr(self, 'log_file') and self.log_file:
-                            self.log_file.write(f"[{prefix}] {line}\n")
+                            self.log_file.write(f"[{prefix}] {stripped}\n")
             except Exception:
                 pass
 
@@ -253,7 +254,6 @@ class LKASLauncher:
 
         # Open log file
         self.log_file = open("lkas_run.log", "w", buffering=1)
-        self.terminal.print("Logging output to lkas_run.log")
 
         # Initialize footer
         self.terminal.init_footer()
@@ -271,44 +271,7 @@ class LKASLauncher:
         signal.signal(signal.SIGTERM, signal_handler)
 
         try:
-            # Start detection server
-            self.terminal.print("Starting detection server...")
-            detection_cmd = self._build_detection_cmd()
-            # Set PYTHONUNBUFFERED to ensure output is not buffered
-            env = os.environ.copy()
-            env['PYTHONUNBUFFERED'] = '1'
-            self.detection_process = subprocess.Popen(
-                detection_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                bufsize=0,  # Unbuffered
-                env=env,
-            )
-            # Make stdout non-blocking
-            if self.detection_process.stdout:
-                flags = fcntl.fcntl(self.detection_process.stdout, fcntl.F_GETFL)
-                fcntl.fcntl(self.detection_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-            self.terminal.print(f"✓ Detection server started (PID: {self.detection_process.pid})")
-
-            # Read detection initialization messages (buffered for ordering)
-            # Buffer for 4 seconds to capture the initial setup messages
-            init_timeout = time.time() + 4.0
-            while time.time() < init_timeout:
-                self._read_process_output(self.detection_process, "DETECTION", self.detection_logger)
-                time.sleep(0.01)
-
-            # Flush detection initialization
-            self.detection_logger.flush()
-
-            # Check if detection server is still running
-            if self.detection_process.poll() is not None:
-                self.terminal.print("✗ Detection server failed to start!")
-                return 1
-
-            # Small delay before starting decision server
-            time.sleep(0.5)
-
-            # Start decision server
+            # Start decision server FIRST (so it's ready when detection starts)
             self.terminal.print("Starting decision server...")
             decision_cmd = self._build_decision_cmd()
             # Set PYTHONUNBUFFERED to ensure output is not buffered
@@ -327,6 +290,9 @@ class LKASLauncher:
                 fcntl.fcntl(self.decision_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
             self.terminal.print(f"✓ Decision server started (PID: {self.decision_process.pid})")
 
+            self.detection_connected = True
+            self._update_footer()
+
             # Read decision initialization messages (buffered for ordering)
             # Buffer for 3 seconds to capture the initial setup messages
             init_timeout = time.time() + 3.0
@@ -341,6 +307,46 @@ class LKASLauncher:
             if self.decision_process.poll() is not None:
                 self.terminal.print("✗ Decision server failed to start!")
                 self.stop()
+                return 1
+
+            # Small delay before starting detection server
+            time.sleep(0.5)
+
+            # Start detection server AFTER decision is ready
+            self.terminal.print("\nStarting detection server...")
+            detection_cmd = self._build_detection_cmd()
+            # Set PYTHONUNBUFFERED to ensure output is not buffered
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
+            self.detection_process = subprocess.Popen(
+                detection_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=0,  # Unbuffered
+                env=env,
+            )
+            # Make stdout non-blocking
+            if self.detection_process.stdout:
+                flags = fcntl.fcntl(self.detection_process.stdout, fcntl.F_GETFL)
+                fcntl.fcntl(self.detection_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            self.terminal.print(f"✓ Detection server started (PID: {self.detection_process.pid})")
+
+            self.decision_connected = True
+            self._update_footer()
+
+            # Read detection initialization messages (buffered for ordering)
+            # Buffer for 4 seconds to capture the initial setup messages
+            init_timeout = time.time() + 4.0
+            while time.time() < init_timeout:
+                self._read_process_output(self.detection_process, "DETECTION", self.detection_logger)
+                time.sleep(0.01)
+
+            # Flush detection initialization
+            self.detection_logger.flush()
+
+            # Check if detection server is still running
+            if self.detection_process.poll() is not None:
+                self.terminal.print("✗ Detection server failed to start!")
                 return 1
 
             # Exit buffering mode - from now on, print messages immediately

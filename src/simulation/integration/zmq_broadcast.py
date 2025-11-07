@@ -384,7 +384,7 @@ class ViewerSubscriber:
             # No message available
             return False
         except Exception as e:
-            print(f"⚠ Error receiving message: {e}")
+            # print(f"⚠ Error receiving message: {e}")
             return False
 
     def run_loop(self):
@@ -508,7 +508,7 @@ class ActionSubscriber:
         except zmq.Again:
             return False
         except Exception as e:
-            print(f"⚠ Error receiving action: {e}")
+            # print(f"⚠ Error receiving action: {e}")
             return False
 
     def close(self):
@@ -560,8 +560,6 @@ class ParameterPublisher:
             b'parameter',
             json.dumps(message).encode('utf-8')
         ])
-
-        print(f"[Param] Sent: {category}.{parameter} = {value}")
 
     def close(self):
         """Close publisher."""
@@ -634,7 +632,7 @@ class ParameterSubscriber:
             # No message available
             return False
         except Exception as e:
-            print(f"⚠ Error receiving parameter: {e}")
+            # print(f"⚠ Error receiving parameter: {e}")
             return False
 
     def close(self):
@@ -696,14 +694,14 @@ class ParameterBroker:
             data = json.loads(parts[1].decode('utf-8'))
             if topic == 'parameter':
                 update = ParameterUpdate(**data)
-                print(f"[Broker] Forwarded: {update.category}.{update.parameter} = {update.value}")
+                # print(f"[Broker] Forwarded: {update.category}.{update.parameter} = {update.value}")
 
             return True
 
         except zmq.Again:
             return False
         except Exception as e:
-            print(f"⚠ Broker error: {e}")
+            # print(f"⚠ Broker error: {e}")
             return False
 
     def close(self):
