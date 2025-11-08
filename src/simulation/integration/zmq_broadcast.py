@@ -508,18 +508,12 @@ class ActionSubscriber:
             topic = parts[0].decode('utf-8')
             data = json.loads(parts[1].decode('utf-8'))
 
-            print(f"[ActionSubscriber] Received topic: {topic}, data: {data}")
-
             if topic == 'action':
                 action = data['action']
                 params = data.get('params', {})
 
-                print(f"[ActionSubscriber] Processing action: {action}")
-
                 if action in self.action_callbacks:
-                    print(f"[ActionSubscriber] Calling handler for: {action}")
                     result = self.action_callbacks[action](**params)
-                    print(f"[ActionSubscriber] Handler result: {result}")
                 else:
                     print(f"[ActionSubscriber] ⚠ Unknown action: {action}")
                     print(f"[ActionSubscriber] Available actions: {list(self.action_callbacks.keys())}")
@@ -528,8 +522,10 @@ class ActionSubscriber:
 
         except zmq.Again:
             return False
+
         except Exception as e:
             print(f"[ActionSubscriber] ⚠ Error receiving action: {e}")
+
             import traceback
             traceback.print_exc()
             return False

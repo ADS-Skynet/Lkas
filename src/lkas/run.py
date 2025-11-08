@@ -26,7 +26,7 @@ import select
 import fcntl
 import re
 from pathlib import Path
-from typing import Optional, List
+from typing import List
 
 from lkas.utils.terminal import TerminalDisplay, OrderedLogger
 from lkas.detection.core.config import ConfigManager
@@ -40,8 +40,8 @@ class LKASLauncher:
     def __init__(
         self,
         method: str = "cv",
-        config: Optional[str] = None,
-        gpu: Optional[int] = None,
+        config: str | None = None,
+        gpu: int | None = None,
         image_shm_name: str = "camera_feed",
         detection_shm_name: str = "detection_results",
         control_shm_name: str = "control_commands",
@@ -156,8 +156,8 @@ class LKASLauncher:
         )
 
         # Process handles
-        self.detection_process: Optional[subprocess.Popen] = None
-        self.decision_process: Optional[subprocess.Popen] = None
+        self.detection_process: subprocess.Popen | None = None
+        self.decision_process: subprocess.Popen | None = None
         self.running = False
         self.broker = None
 
@@ -384,20 +384,31 @@ class LKASLauncher:
         Called periodically in the main loop.
         Lazy-connects to shared memory on first successful read.
         """
+
         if not self.broker:
             return
 
         # Lazy connection to image channel
         if self.image_channel is None:
             try:
+                import sys
+                import io
                 from lkas.detection.integration.shared_memory_detection import SharedMemoryImageChannel
-                self.image_channel = SharedMemoryImageChannel(
-                    name=self.image_shm_name,
-                    shape=(self.system_config.camera.height, self.system_config.camera.width, 3),
-                    create=False,  # Reader mode
-                    retry_count=1,  # Single attempt
-                    retry_delay=0.0,
-                )
+
+                # Suppress stdout during connection to avoid empty line from flush()
+                old_stdout = sys.stdout
+                sys.stdout = io.StringIO()
+                try:
+                    self.image_channel = SharedMemoryImageChannel(
+                        name=self.image_shm_name,
+                        shape=(self.system_config.camera.height, self.system_config.camera.width, 3),
+                        create=False,  # Reader mode
+                        retry_count=1,  # Single attempt
+                        retry_delay=0.0,
+                    )
+                finally:
+                    sys.stdout = old_stdout
+
                 self.terminal.print(f"✓ Connected to image channel: {self.image_shm_name}")
             except Exception:
                 pass  # Will retry on next call
@@ -458,10 +469,10 @@ class LKASLauncher:
                     self.broker.broadcast_detection(detection_data, detection_msg.frame_id)
                     # Log successful broadcast at configured interval
                     if detection_msg.frame_id % self.broadcast_log_interval == 0:
-                        self.terminal.print(f"[green]✓ Broadcasting detection: frame {detection_msg.frame_id}, L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None}[/green]")
+                        self.terminal.print(f"[Broker] Detection: frame {detection_msg.frame_id}, L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None}")
             except Exception as e:
                 # Log errors to help diagnose issues
-                self.terminal.print(f"[yellow]Warning: Failed to broadcast detection: {e}[/yellow]")
+                self.terminal.print(f"Warning: Failed to broadcast detection: {e}")
 
     def run(self):
         """Start both servers and manage their lifecycle."""

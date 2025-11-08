@@ -249,7 +249,6 @@ class SharedMemoryImageChannel:
                         # )
                         time.sleep(retry_delay)
                     else:
-                        print(flush=True)  # Clear the retry line
                         raise ConnectionError(
                             f"Shared memory '{name}' not found after {retry_count} attempts. "
                             f"Make sure the writer process is running."
