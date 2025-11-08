@@ -1,402 +1,426 @@
 # Simulation Module
 
-CARLA simulation orchestrator for the Lane Keeping Assist System.
+**CARLA simulator integration for testing Lane Keeping Assist System in a virtual environment.**
 
 ## Overview
 
-The simulation module integrates with CARLA simulator to provide:
-- Vehicle spawning and control
-- Camera sensor management
-- LKAS module coordination via shared memory
-- ZMQ-based vehicle status broadcasting to LKAS broker
-- Remote action handling (pause/resume/respawn)
-- Performance metrics and logging
-
-## Features
-
-- **CARLA Integration**:
-  - Connection management and reconnection logic
-  - Vehicle spawning with configurable models
-  - Camera sensor setup and image capture
-  - World and weather management
-
-- **LKAS Coordination**:
-  - Detection client for lane detection results
-  - Decision client for steering commands
-  - Shared memory-based IPC for low latency
-  - ZMQ-based vehicle status publishing to LKAS broker
-  - Action subscription from LKAS broker (pause/resume/respawn)
-
-- **Remote Viewer Support**:
-  - Publishes vehicle status to LKAS broker (port 5562)
-  - Receives actions from LKAS broker (port 5561)
-  - LKAS broker handles all viewer communication and data broadcasting
-
-- **Performance Monitoring**:
-  - Real-time FPS tracking
-  - Frame processing metrics
-  - Detection/decision latency measurement
-  - Comprehensive logging
-
-## Module Structure
-
-```
-simulation/
-├── run.py                       # Main simulation entry point
-├── orchestrator.py              # System orchestrator
-│
-├── carla_api/                   # CARLA interface layer
-│   ├── connection.py            # CARLA connection management
-│   ├── vehicle.py               # Vehicle spawning and control
-│   └── sensors.py               # Camera sensor management
-│
-├── integration/                 # LKAS integration
-│   └── __init__.py              # Detection/Decision client wrappers
-│
-├── processing/                  # Frame processing pipeline
-│   ├── frame_processor.py       # Main processing loop
-│   └── metrics_logger.py        # Performance metrics
-│
-└── utils/                       # Utilities
-    └── visualizer.py            # Visualization helpers
-```
-
-## Installation
-
-### Prerequisites
-
-1. **CARLA Simulator**: Download and install from [https://carla.org/](https://carla.org/)
-   - Recommended: CARLA 0.9.15+
-   - Start with: `./CarlaUE4.sh` (Linux/Mac) or `CarlaUE4.exe` (Windows)
-
-2. **Python Package**: Install the ads-skynet package
-   ```bash
-   cd /path/to/ads_skynet
-   pip install -e .
-   ```
-
-## Usage
-
-### Quick Start
-
-```bash
-# Terminal 1: Start CARLA
-./CarlaUE4.sh
-
-# Terminal 2: Start LKAS with ZMQ broker for viewer support
-lkas --method cv --broadcast
-
-# Terminal 3: Start simulation with broadcast enabled
-simulation --broadcast
-
-# Terminal 4: Start web viewer (optional)
-viewer
-
-# The viewer will show vehicle status, lane detection, and interactive controls
-```
-
-### Command Line Options
-
-```bash
-simulation --help
-
-Options:
-  --host HOST              CARLA server host (overrides config, default: from config.yaml)
-  --port PORT              CARLA server port (overrides config, default: from config.yaml)
-  --spawn-point N          Spawn vehicle at specific point (default: random)
-  --config PATH            Path to config file (default: auto-detected)
-  --broadcast              Enable ZMQ broadcasting to LKAS broker (for viewer support)
-  --autopilot              Enable CARLA autopilot
-  --no-sync                Disable synchronous mode
-  --verbose                Enable verbose output
-```
-
-### Examples
-
-**Standard mode with viewer support** (recommended):
-```bash
-# Enable broadcasting to LKAS broker for web viewer
-simulation --broadcast
-
-# In another terminal, start the viewer
-viewer
-```
-
-**Remote CARLA server**:
-```bash
-simulation --host 192.168.1.100 --port 2000 --broadcast
-```
-
-**Custom spawn point**:
-```bash
-simulation --spawn-point 5 --broadcast
-```
-
-**Verbose output**:
-```bash
-simulation --broadcast --verbose
-```
-
-**Custom configuration**:
-```bash
-simulation --config /path/to/custom-config.yaml --broadcast
-```
-
-## Programming API
-
-### Using as a Library
-
-```python
-from simulation import SimulationOrchestrator
-from simulation.carla_api import CARLAConnection, VehicleManager
-from lkas.detection.core.config import ConfigManager
-
-# Load configuration
-config = ConfigManager.load('config.yaml')
-
-# Connect to CARLA
-connection = CARLAConnection(
-    host='localhost',
-    port=2000,
-    timeout=10.0
-)
-connection.connect()
-
-# Spawn vehicle
-vehicle_mgr = VehicleManager(connection.world)
-vehicle = vehicle_mgr.spawn_vehicle()
-
-# Create orchestrator
-orchestrator = SimulationOrchestrator(
-    config=config,
-    connection=connection,
-    vehicle=vehicle
-)
-
-# Run simulation loop
-orchestrator.run()
-```
-
-### Using Detection/Decision Clients
-
-```python
-from lkas.detection import DetectionClient
-from lkas.decision import DecisionClient
-from lkas.detection.core.config import ConfigManager
-
-# Initialize clients
-config = ConfigManager.load('config.yaml')
-detection_client = DetectionClient(config)
-decision_client = DecisionClient(config)
-
-# Send image for detection
-detection_client.write_image(image_array, frame_id=123)
-
-# Read detection result
-detection_msg = detection_client.read_detection()
-if detection_msg:
-    print(f"Lanes detected: {detection_msg.left_lane}, {detection_msg.right_lane}")
-
-# Read steering command from decision
-steering_msg = decision_client.read_steering()
-if steering_msg:
-    print(f"Steering: {steering_msg.steering}")
-```
+The simulation module bridges CARLA simulator with the LKAS pipeline, providing a realistic testing environment for autonomous driving algorithms. It manages vehicle spawning, camera sensors, and bidirectional communication with LKAS via ZMQ.
 
 ## Architecture
 
-### System Flow
-
 ```
-┌─────────────────────────────────────────────────────┐
-│             CARLA Simulator                         │
-│  ┌──────────┐      ┌──────────┐      ┌──────────┐  │
-│  │  World   │ ───▶ │ Vehicle  │ ───▶ │  Camera  │  │
-│  └──────────┘      └──────────┘      └──────────┘  │
-└─────────────────────────────────────────────────────┘
-         │                                    │
-         │ Steering                           │ Image
-         ▼                                    ▼
-┌──────────────────────┐         ┌──────────────────────┐
-│  Decision Module     │         │  Detection Module    │
-│  (Shared Memory)     │ ◀────── │  (Shared Memory)     │
-└──────────────────────┘         └──────────────────────┘
-         │                                    │
-         │ Steering Command                   │ Detection Result
-         ▼                                    ▼
-┌─────────────────────────────────────────────────────┐
-│           Simulation Orchestrator                   │
-│  • Reads detections via shared memory               │
-│  • Reads steering via shared memory                 │
-│  • Applies control to CARLA vehicle                 │
-│  • Publishes vehicle status to LKAS broker (ZMQ)    │
-│  • Receives actions from LKAS broker (ZMQ)          │
-└─────────────────────────────────────────────────────┘
-         │                                    │
-         │ Vehicle Status (5562)              │ Actions (5561)
-         ▼                                    ▼
-┌─────────────────────────────────────────────────────┐
-│              LKAS ZMQ Broker                        │
-│  • Routes vehicle status to viewers                 │
-│  • Routes actions to simulation                     │
-│  • Broadcasts frames and detection data             │
-└─────────────────────────────────────────────────────┘
-         │
-         │ All data (5557)
-         ▼
-┌─────────────────────────────────────────────────────┐
-│              Web Viewer                             │
-│  • Displays video stream with lane overlays        │
-│  • Shows vehicle status (speed, position)           │
-│  • Interactive controls (pause/resume/respawn)      │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                   CARLA Simulator                       │
+│                    (UE4 Engine)                         │
+└────────────┬────────────────────────────┬───────────────┘
+             │                            │
+       Vehicle Control              Camera Frames
+             │                            │
+┌────────────┴────────────────────────────┴───────────────┐
+│              Simulation Orchestrator                    │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  ┌────────────────┐        ┌──────────────────────┐   │
+│  │ CARLA Manager  │        │  ZMQ Communication   │   │
+│  │ - Vehicle      │   <->  │  - Send frames       │   │
+│  │ - Camera       │        │  - Receive steering  │   │
+│  │ - World        │        │  - Publish status    │   │
+│  └────────────────┘        └──────────────────────┘   │
+│                                                         │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+              ┌───────────┼───────────┐
+              │           │           │
+          ZMQ Port    ZMQ Port    ZMQ Port
+            5560        5563        5562
+              │           │           │
+        Send Frames  Receive     Publish Status
+         to LKAS     Steering     to Broker
 ```
 
-### Communication Architecture
+## Features
 
-**Shared Memory (Low Latency IPC):**
-- **Image Channel**: Sends camera images to detection module
-- **Detection Channel**: Receives lane detection results
-- **Control Channel**: Receives steering commands from decision module
-- Benefits: ~0.1ms latency, zero-copy transfer
+### CARLA Integration
+- **Connection management:**
+  - Automatic connection with retry logic
+  - Graceful disconnection handling
+  - Health monitoring
+- **Vehicle spawning:**
+  - Configurable vehicle models
+  - Spawn point selection
+  - Autopilot toggle
+- **Camera sensors:**
+  - RGB camera setup
+  - Configurable resolution and FOV
+  - Real-time frame capture
+- **World management:**
+  - Weather control
+  - Time of day settings
+  - Traffic and pedestrian spawning
 
-**ZMQ (Remote Viewer Support):**
-- **Vehicle Status Publisher** (Port 5562): Sends vehicle state to LKAS broker
-  - Data: steering, throttle, brake, speed, position, rotation, pause state
-- **Action Subscriber** (Port 5561): Receives actions from LKAS broker
-  - Actions: pause, resume, respawn
-- Benefits: Network-capable, multiple subscribers, fire-and-forget
+### LKAS Communication (ZMQ)
+- **Frame transmission:**
+  - Sends camera frames to LKAS (port 5560)
+  - High-frequency updates (30+ FPS)
+  - Efficient serialization
+- **Steering reception:**
+  - Receives steering commands from LKAS (port 5563)
+  - Applies control to CARLA vehicle
+  - Low-latency actuation
+- **Status broadcasting:**
+  - Publishes vehicle state to LKAS broker (port 5562)
+  - Speed, position, rotation data
+  - Real-time telemetry
+
+### Action Handling
+- **Remote control from Viewer:**
+  - **Pause:** Freeze simulation
+  - **Resume:** Continue simulation
+  - **Respawn:** Reset vehicle to spawn point
+- Actions received from LKAS broker (port 5561)
+
+### Performance Monitoring
+- **Real-time metrics:**
+  - Simulation FPS
+  - Frame processing latency
+  - LKAS response time
+- **Comprehensive logging:**
+  - Timestamped events
+  - Error tracking
+  - Performance diagnostics
+
+## Quick Start
+
+### Prerequisites
+
+```bash
+# Ensure CARLA is installed and running
+cd ~/carla
+./CarlaUE4.sh
+```
+
+### Basic Usage
+
+```bash
+# Start simulation with broadcasting
+simulation --broadcast
+
+# Start with custom spawn point
+simulation --broadcast --spawn-id 123
+
+# Start with specific vehicle model
+simulation --config my_config.yaml --broadcast
+```
+
+### Full System Setup
+
+```bash
+# Terminal 1: CARLA simulator
+cd ~/carla
+./CarlaUE4.sh
+
+# Terminal 2: LKAS with ZMQ broker
+cd ~/ads_skynet
+lkas --method cv --broadcast
+
+# Terminal 3: Simulation
+simulation --broadcast
+
+# Terminal 4: Viewer (optional)
+viewer
+
+# Open browser: http://localhost:8080
+```
 
 ## Configuration
 
-Configuration is managed via `config.yaml` in the project root.
+Configuration is in `config.yaml` at project root.
 
 ### CARLA Settings
 
 ```yaml
 carla:
-  host: "localhost"
+  host: localhost
   port: 2000
   timeout: 10.0
-  vehicle_type: "vehicle.tesla.model3"
-  spawn_point: null  # null for random spawn
-```
 
-### Camera Settings
+  vehicle:
+    model: vehicle.tesla.model3
+    spawn_point: 0  # or null for random
+    enable_autopilot: false
 
-```yaml
-camera:
-  width: 800
-  height: 600
-  fov: 90.0
-  position:
-    x: 2.0
+  camera:
+    width: 640
+    height: 480
+    fov: 110
+    x: 1.5
     y: 0.0
-    z: 1.5
-  rotation:
-    pitch: -10.0
-    yaw: 0.0
-    roll: 0.0
+    z: 1.4
+    pitch: 0
+    yaw: 0
+    roll: 0
+
+  world:
+    town: Town03
+    weather: ClearNoon
 ```
 
-### Visualization Settings
+### ZMQ Configuration
 
 ```yaml
-visualization:
-  web_port: 8080              # Web viewer port (runs separately)
-  show_spectator_overlay: true
-  follow_with_spectator: false
-  show_hud: true
-  show_steering: true
-  fill_lane: true
-  enable_alerts: true
+zmq:
+  simulation:
+    # LKAS communication
+    detection_output_port: 5560    # Send frames to LKAS
+    decision_input_port: 5563      # Receive steering from LKAS
 
-# Note: Web viewer now runs as separate process via 'viewer' command
-# It connects to LKAS broker which receives data from simulation
+    # Broker communication
+    status_publish_port: 5562      # Publish status to LKAS broker
+    action_subscribe_port: 5561    # Receive actions from broker
 ```
 
-### Performance Settings
+## Module Structure
 
-```yaml
-performance:
-  target_fps: 30
-  max_frame_skip: 5
-  enable_logging: true
-  log_level: "INFO"
+```
+simulation/
+├── run.py                        # Main entry point
+├── orchestrator.py               # System coordinator
+│
+├── carla_api/                    # CARLA interface
+│   ├── connection.py             # Connection management
+│   ├── vehicle.py                # Vehicle control
+│   ├── camera.py                 # Camera sensors
+│   └── world.py                  # World management
+│
+├── integration/                  # Communication layer
+│   ├── zmq_broadcast.py          # ZMQ publishers/subscribers
+│   └── shared_memory/            # Legacy IPC (deprecated)
+│       └── channels.py
+│
+├── utils/                        # Utilities
+│   ├── visualizer.py             # Overlay rendering
+│   └── metrics.py                # Performance tracking
+│
+└── constants.py                  # Configuration constants
+```
+
+## Communication Protocols
+
+### Frame Output (to LKAS)
+```python
+# Simulation → LKAS (port 5560)
+{
+    "topic": "frame",
+    "image": <numpy_array>,      # (H, W, 3) uint8
+    "timestamp": 1234567890.123,
+    "metadata": {
+        "width": 640,
+        "height": 480
+    }
+}
+```
+
+### Steering Input (from LKAS)
+```python
+# LKAS → Simulation (port 5563)
+{
+    "steering": 0.25,   # -1.0 (full left) to 1.0 (full right)
+    "throttle": 0.14,   # 0.0 to 1.0
+    "brake": 0.0        # 0.0 to 1.0
+}
+```
+
+### Status Broadcast (to LKAS Broker)
+```python
+# Simulation → LKAS Broker (port 5562)
+{
+    "type": "state",
+    "speed_kmh": 8.0,
+    "position": {"x": 10.0, "y": 20.0, "z": 0.5},
+    "rotation": {"pitch": 0.0, "yaw": 90.0, "roll": 0.0},
+    "steering": 0.1,
+    "throttle": 0.14,
+    "timestamp": 1234567890.123
+}
+```
+
+### Action Reception (from LKAS Broker)
+```python
+# LKAS Broker → Simulation (port 5561)
+{
+    "action": "pause"    # pause, resume, respawn
+}
+```
+
+## Performance
+
+### Typical Metrics
+
+- **Simulation FPS:** 30-60 FPS (depends on CARLA settings)
+- **Frame transmission latency:** <10ms
+- **Steering application latency:** <5ms
+- **End-to-end latency:** 20-50ms (CARLA → LKAS → CARLA)
+
+### Performance Tips
+
+1. **Reduce camera resolution:**
+   ```yaml
+   carla:
+     camera:
+       width: 640
+       height: 480
+   ```
+
+2. **Use simpler vehicle models:**
+   ```yaml
+   carla:
+     vehicle:
+       model: vehicle.tesla.model3  # Simpler than heavy trucks
+   ```
+
+3. **Optimize CARLA settings:**
+   ```bash
+   # Lower graphics quality in CARLA settings
+   # Disable unnecessary actors (traffic, pedestrians)
+   ```
+
+## Development
+
+### Adding Custom Vehicle Spawning
+
+```python
+# In carla_api/vehicle.py
+def spawn_custom_vehicle(world, model_name, spawn_point):
+    blueprint = world.get_blueprint_library().find(model_name)
+    vehicle = world.spawn_actor(blueprint, spawn_point)
+    return vehicle
+```
+
+### Custom Camera Configuration
+
+```python
+# In carla_api/camera.py
+def setup_multi_camera(vehicle):
+    # Front camera
+    front_cam = setup_camera(vehicle, x=1.5, z=1.4)
+
+    # Side cameras
+    left_cam = setup_camera(vehicle, x=0.0, y=-1.0, z=1.4)
+    right_cam = setup_camera(vehicle, x=0.0, y=1.0, z=1.4)
+
+    return [front_cam, left_cam, right_cam]
+```
+
+### Debugging
+
+Enable verbose logging:
+```bash
+simulation --broadcast --verbose
+```
+
+Monitor ZMQ ports:
+```bash
+# Check if ports are listening
+ss -tlnp | grep '556[0-3]'
+
+# Monitor ZMQ traffic (requires tcpdump)
+sudo tcpdump -i lo -n port 5560
 ```
 
 ## Troubleshooting
 
-### CARLA Connection Issues
+### Cannot connect to CARLA
+```
+Error: Failed to connect to CARLA at localhost:2000
+```
+**Fix:**
+- Ensure CARLA is running: `./CarlaUE4.sh`
+- Check CARLA port in config: `carla.port`
+- Verify firewall settings
 
-**Problem**: `RuntimeError: time-out of 10.0s while waiting for the simulator`
+### Vehicle not responding to steering
+```
+Warning: Steering commands not applied
+```
+**Fix:**
+- Ensure LKAS is running and connected
+- Check ZMQ port 5563 is available
+- Verify `--broadcast` flag is used
+- Check steering values are in range [-1.0, 1.0]
 
-**Solutions**:
-- Ensure CARLA is running: `ps aux | grep CarlaUE4`
-- Check CARLA is listening: `netstat -an | grep 2000`
-- Increase timeout: `simulation --timeout 30.0`
-- Try different port: `simulation --port 2001`
+### Low FPS / Performance issues
+```
+Warning: Simulation FPS below 20
+```
+**Fix:**
+- Reduce camera resolution in config
+- Lower CARLA graphics quality
+- Close unnecessary applications
+- Use simpler map (Town01 instead of Town10HD)
 
-### Visualization Issues
+### ZMQ communication errors
+```
+Error: ZMQ socket bind failed
+```
+**Fix:**
+- Kill processes using the ports:
+  ```bash
+  lsof -ti:5560 | xargs kill -9
+  lsof -ti:5563 | xargs kill -9
+  ```
+- Check port configuration in `config.yaml`
+- Ensure no duplicate simulation instances
 
-**Problem**: Web viewer shows blank page
+## Advanced Usage
 
-**Solutions**:
-- Check web port is accessible: `curl http://localhost:8080`
-- Try different port: `simulation --web-port 8081`
-- Check browser console for errors
+### Multi-Vehicle Simulation
 
-**Problem**: OpenCV window doesn't appear
+```python
+# Custom orchestrator setup
+orchestrator = SimulationOrchestrator(config)
+orchestrator.spawn_vehicle("vehicle.tesla.model3", spawn_id=0)
+orchestrator.spawn_vehicle("vehicle.audi.a2", spawn_id=50)
+```
 
-**Solutions**:
-- Ensure X11 is available: `echo $DISPLAY`
-- Use web viewer instead: `simulation --viewer web`
-- Check OpenCV installation: `python -c "import cv2; print(cv2.__version__)"`
+### Custom Weather Conditions
 
-### Performance Issues
+```yaml
+carla:
+  world:
+    weather:
+      cloudiness: 80.0
+      precipitation: 30.0
+      sun_altitude_angle: 70.0
+```
 
-**Problem**: Low FPS, laggy simulation
+### Recording and Replay
 
-**Solutions**:
-- Reduce camera resolution in config.yaml
-- Use headless mode: `simulation --viewer none`
-- Check CARLA server performance
-- Ensure detection/decision servers are responsive
+```bash
+# Record simulation data
+simulation --broadcast --record output.log
 
-### Shared Memory Issues
+# Replay recorded data
+simulation --replay output.log
+```
 
-**Problem**: `FileNotFoundError: [Errno 2] No such file or directory: '/dev/shm/...'`
+## Integration with Other Modules
 
-**Solutions**:
-- Ensure detection server is running: `ps aux | grep lane-detection`
-- Ensure decision server is running: `ps aux | grep decision-server`
-- Check shared memory: `ls -la /dev/shm/`
-- Restart all modules in correct order
+### With LKAS
+```
+Simulation → (port 5560) → LKAS (Detection)
+LKAS (Decision) → (port 5563) → Simulation
+Simulation → (port 5562) → LKAS Broker
+```
 
-## Related Modules
-
-- [LKAS Detection Module](../lkas/detection/README.md) - Lane detection algorithms
-- [LKAS Decision Module](../lkas/decision/) - Control decision logic
-- [Viewer Module](../viewer/README.md) - Remote web viewer
-
-## Performance Metrics
-
-Typical performance on modern hardware:
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| FPS | 25-30 | With web visualization |
-| Detection Latency | 5-10ms | CV method |
-| Decision Latency | <1ms | PD controller |
-| Total Loop Time | ~33ms | 30 FPS |
-| Memory (Simulation) | ~200MB | Excluding CARLA |
+### With Viewer
+```
+Simulation → LKAS Broker → (port 5557) → Viewer
+Viewer → (port 5558) → LKAS Broker → (port 5561) → Simulation
+```
 
 ## References
 
 - [CARLA Documentation](https://carla.readthedocs.io/)
-- [Main Project README](../../README.md)
-- [Configuration Guide](../../config.yaml)
-
-## License
-
-See [LICENSE](../../LICENSE) file in project root.
+- [ZMQ Integration Guide](integration/README.md)
+- [LKAS Module](../lkas/README.md)
+- [Viewer Module](../viewer/README.md)

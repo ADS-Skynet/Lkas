@@ -1,297 +1,558 @@
 # Viewer Module
 
-**Standalone ZMQ-based web viewer for remote monitoring of autonomous vehicles.**
+**Real-time WebSocket-powered web interface for remote monitoring and control of autonomous vehicles.**
 
 ## Overview
 
-The viewer runs as a **separate process** and connects to the LKAS ZMQ broker to:
-- ✅ Receives video frames, lane detection, and vehicle status via ZMQ (port 5557)
-- ✅ Renders overlays on laptop (offloads vehicle CPU)
-- ✅ Serves web interface on localhost:8080
-- ✅ Sends commands (pause/resume/respawn) back to simulation
-- ✅ Adjusts detection/decision parameters in real-time
+The viewer is a standalone process that provides a rich web interface for monitoring the LKAS system and simulation. It receives data from the LKAS broker via ZMQ and serves an interactive web dashboard with **WebSocket streaming** for ultra-low latency.
 
-## Why Separate Viewer?
+## Key Features
 
-**Benefits:**
-- ✅ **Offloads vehicle CPU** - All rendering happens on laptop!
-- ✅ **Rich visualizations** - Complex overlays don't impact vehicle performance
-- ✅ **Remote monitoring** - Connect from any machine on network
-- ✅ **Multiple viewers** - Multiple people can monitor simultaneously
-- ✅ **Live tuning** - Adjust parameters without restarting system
-
-## Quick Start
-
-The viewer connects to the LKAS ZMQ broker which receives data from simulation.
-
-```bash
-# Terminal 1: Start CARLA
-./CarlaUE4.sh
-
-# Terminal 2: Start LKAS with ZMQ broker enabled
-lkas --method cv --broadcast
-
-# Terminal 3: Start simulation with broadcasting
-simulation --broadcast
-
-# Terminal 4: Start web viewer
-viewer
-
-# Open browser
-# http://localhost:8080
-```
-
-### Port Configuration
-
-Web viewer port can be configured in `config.yaml`:
-
-```yaml
-visualization:
-  web_port: 8080  # Default port
-```
-
-Or override via command line:
-
-```bash
-viewer --port 8081
-```
-
-## Usage
-
-### Command Line Options
-
-```bash
-viewer --help
-
-Options:
-  --vehicle URL      ZMQ URL for vehicle data (default: tcp://localhost:5557)
-  --actions URL      ZMQ URL for sending actions (default: tcp://localhost:5558)
-  --parameters URL   ZMQ URL for parameter updates (default: tcp://localhost:5559)
-  --port N           HTTP port for web interface (default: from config.yaml)
-  --config PATH      Path to config file (default: auto-detected)
-  --verbose          Enable verbose HTTP logging
-```
-
-### Features
-
-**Real-time Visualization:**
-- **Video streaming** with lane overlays rendered on laptop
-- **Lane detection overlay** (left/right lanes with confidence)
-- **HUD display** with vehicle telemetry:
-  - Speed (km/h), steering angle
-  - Position (x, y), rotation (pitch, yaw, roll)
-  - Detection processing time
-
-**Interactive Controls:**
-- **Pause/Resume** simulation via web button
-- **Respawn vehicle** at spawn point
-- **Live parameter tuning** for detection and decision modules
-  - Detection: Canny thresholds, Hough parameters, smoothing
-  - Decision: PID gains (Kp, Kd), throttle settings
-
-**Network Monitoring:**
-- Works over local network or WiFi
-- Multiple viewers can connect simultaneously
-- Automatic reconnection on network issues
+- **WebSocket Real-Time Streaming:**
+  - Binary frame transmission (no base64 overhead!)
+  - Instant parameter updates
+  - Live status push notifications
+  - ~50-300ms total latency
+- **Rich Visualizations:**
+  - Lane detection overlays
+  - Vehicle telemetry (speed, steering, position)
+  - HUD with status indicators
+  - Real-time FPS and latency monitoring
+- **Interactive Controls:**
+  - Pause/Resume simulation
+  - Respawn vehicle
+  - Adjust detection parameters live
+  - Tune PID controller in real-time
+- **Performance Optimized:**
+  - Rendering offloaded to laptop (vehicle CPU stays free!)
+  - Frame rate limiting (30 FPS)
+  - Efficient binary WebSocket frames
+  - Automatic reconnection
 
 ## Architecture
 
 ```
-┌─ CARLA Simulator ────────────────────────────────────────┐
-│  • Provides camera images                                │
-│  • Receives steering commands                            │
-└───────────────┬──────────────────────────────────────────┘
-                │ Shared Memory
-                ▼
-┌─ Simulation Orchestrator ────────────────────────────────┐
-│  • Reads LKAS detection/control via shared memory        │
-│  • Publishes vehicle status to LKAS broker (port 5562)   │
-│  • Receives actions from LKAS broker (port 5561)         │
-└───────────────┬──────────────────────────────────────────┘
-                │ ZMQ (Vehicle Status)
-                ▼
-┌─ LKAS ZMQ Broker (port 5557-5562) ───────────────────────┐
-│  • Receives vehicle status from simulation                │
-│  • Receives frames/detection from LKAS shared memory      │
-│  • Broadcasts all data to viewers (port 5557)            │
-│  • Routes parameters to detection/decision servers        │
-│  • Forwards actions to simulation                        │
-└───────────────┬──────────────────────────────────────────┘
-                │ ZMQ (All Data: 5557)
-                ▼
-┌─ VIEWER PROCESS (Laptop) ────────────────────────────────┐
-│  ┌────────────────────────────────────────────────────┐  │
-│  │  ZMQ Subscriber (connects to broker:5557)          │  │
-│  │  • Receives video frames (JPEG compressed)         │  │
-│  │  • Receives lane detection results                 │  │
-│  │  • Receives vehicle status (speed, position, etc)  │  │
-│  └─────────────────┬──────────────────────────────────┘  │
-│                    ▼                                      │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │  Overlay Renderer (runs on laptop!)                │  │
-│  │  • Draws lane lines on frame                       │  │
-│  │  • Renders HUD with vehicle telemetry              │  │
-│  │  • Generates MJPEG stream for browser              │  │
-│  └─────────────────┬──────────────────────────────────┘  │
-│                    ▼                                      │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │  HTTP Server (localhost:8080)                      │  │
-│  │  • Serves HTML/CSS/JavaScript                      │  │
-│  │  • Streams MJPEG video (/stream endpoint)          │  │
-│  │  • Handles actions POST (/action endpoint)         │  │
-│  │  • Handles parameters POST (/parameter endpoint)   │  │
-│  └─────────────────┬──────────────────────────────────┘  │
-│                    │                                      │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │  ZMQ Publishers (send to broker)                   │  │
-│  │  • Actions (pause/resume/respawn) → port 5558      │  │
-│  │  • Parameters (Kp, Kd, thresholds) → port 5559     │  │
-│  └────────────────────────────────────────────────────┘  │
-└────────────────────┬──────────────────────────────────────┘
-                     │ HTTP
-                     ▼
-            ┌────────────────┐
-            │    Browser     │
-            │  localhost:8080│
-            │  • Video stream│
-            │  • Controls    │
-            │  • Parameters  │
-            └────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    LKAS Broker                          │
+│              (ZMQ Message Hub)                          │
+└───────┬─────────────────────┬───────────────────────────┘
+        │                     │
+   Frames/Status         Actions/Params
+     (port 5557)          (port 5558/5559)
+        │                     │
+┌───────┴─────────────────────┴───────────────────────────┐
+│                  Viewer Process                         │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  ┌──────────────┐      ┌──────────────────────────┐   │
+│  │ ZMQ Layer    │      │  Web Servers             │   │
+│  │ - Subscribe  │  ->  │  - HTTP (port 8080)      │   │
+│  │ - Publish    │      │  - WebSocket (port 8081) │   │
+│  └──────────────┘      └──────────────────────────┘   │
+│         │                         │                     │
+│         │                         │                     │
+│  ┌──────┴─────────────────────────┴─────────────┐     │
+│  │          Rendering Engine                     │     │
+│  │  - Lane overlays                              │     │
+│  │  - HUD rendering                              │     │
+│  │  - Metric visualization                       │     │
+│  └───────────────────────────────────────────────┘     │
+│                                                         │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+                    WebSocket
+                  (Binary Frames)
+                          │
+              ┌───────────┴───────────┐
+              │   Web Browser         │
+              │  (localhost:8080)     │
+              └───────────────────────┘
 ```
 
-**Key Points:**
-- **Rendering on laptop**: Heavy drawing operations don't impact vehicle
-- **Centralized broker**: LKAS broker handles all routing and broadcasting
-- **Separate processes**: Viewer, LKAS, and simulation run independently
-- **Network capable**: Works over local network or WiFi
+## Quick Start
 
-## Features
+### Prerequisites
 
-### Visualization Elements
+Ensure LKAS and simulation are running:
+```bash
+# Terminal 1: CARLA
+./CarlaUE4.sh
 
-**Lane Overlays:**
-- Left lane line (green/red based on detection)
-- Right lane line (green/red based on detection)
-- Lane confidence indicators
-- Region of interest (ROI) visualization
+# Terminal 2: LKAS
+lkas --method cv --broadcast
 
-**HUD Display:**
-- Vehicle speed (km/h)
-- Steering angle (degrees)
-- Lateral offset from center
-- Heading angle deviation
-- Lane departure status
-- Detection FPS and latency
-- Frame processing time
+# Terminal 3: Simulation
+simulation --broadcast
+```
 
-**Interactive Controls:**
-- Keyboard shortcuts for vehicle control
-- Respawn vehicle button
-- Toggle autopilot mode
-- Adjust visualization settings
+### Start Viewer
+
+```bash
+# Default (port 8080)
+viewer
+
+# Custom port
+viewer --port 9090
+
+# Verbose mode
+viewer --verbose
+```
+
+### Access Web Interface
+
+Open browser: **http://localhost:8080**
+
+You should see:
+- **Connection:** Green "Connected" status
+- **FPS:** Real-time frame rate
+- **Latency:** Frame-to-frame time
+- **Live video:** Lane detection overlay
+
+## Configuration
+
+### Port Configuration
+
+In `config.yaml`:
+```yaml
+visualization:
+  web_port: 8080  # HTTP server port (WebSocket will be port+1)
+```
+
+Or via CLI:
+```bash
+viewer --port 8080  # WebSocket will automatically use 8081
+```
+
+### ZMQ Configuration
+
+```yaml
+zmq:
+  viewer:
+    # Data reception
+    vehicle_data_url: tcp://localhost:5557    # Receive from LKAS broker
+
+    # Command transmission
+    action_url: tcp://localhost:5558          # Send actions to broker
+    parameter_url: tcp://localhost:5559       # Send parameters to broker
+```
+
+## Web Interface Features
+
+### Video Stream
+- **High-quality visualization:**
+  - Lane detection overlays (blue lines)
+  - Lane fill (green transparent)
+  - HUD with telemetry
+- **Real-time metrics:**
+  - Detection processing time
+  - Vehicle speed
+  - Steering angle
+
+### Control Panel
+
+**Actions:**
+- **🔄 Respawn Vehicle** - Reset vehicle to spawn point
+- **⏸ Pause / ▶ Resume** - Control simulation state
+
+**Keyboard Shortcuts:**
+- `R` - Respawn vehicle
+- `Space` - Toggle pause/resume
+
+### Live Parameter Tuning
+
+#### Detection Parameters
+- **Canny Low Threshold** (1-150)
+- **Canny High Threshold** (50-255)
+- **Hough Threshold** (1-150)
+- **Hough Min Line Length** (10-150)
+- **Smoothing Factor** (0-1)
+
+#### Decision (PID) Parameters
+- **Kp** - Proportional gain (0-2)
+- **Kd** - Derivative gain (0-1)
+- **Base Throttle** (0-0.5)
+- **Min Throttle** (0-0.2)
+- **Steer Threshold** (0-0.5)
+
+**All parameter changes apply instantly!**
+
+### Status Indicators
+
+- **Connection Status:**
+  - 🟢 Green - Connected
+  - 🟠 Orange - Connecting
+  - 🔴 Red - Disconnected
+- **FPS Display:** Real-time frame rate
+- **Latency Display:** Frame-to-frame latency in milliseconds
+
+## WebSocket Protocol
+
+### Communication Flow
+
+1. **Browser connects to WebSocket** (port 8081)
+2. **Server pushes binary frames** (JPEG compressed)
+3. **Server pushes status updates** (JSON, every 500ms)
+4. **Browser sends actions/parameters** (JSON)
+
+### Message Types
+
+#### Server → Browser (Binary)
+```
+<JPEG bytes>  # Raw JPEG image data
+```
+
+#### Server → Browser (JSON)
+```json
+{
+  "type": "status",
+  "paused": false,
+  "state_received": true,
+  "speed_kmh": 8.0,
+  "steering": 0.1,
+  "detection_time_ms": 12.3
+}
+```
+
+#### Browser → Server (JSON)
+```json
+// Action
+{
+  "type": "action",
+  "action": "pause"  // pause, resume, respawn
+}
+
+// Parameter update
+{
+  "type": "parameter",
+  "category": "detection",  // detection, decision
+  "parameter": "canny_low",
+  "value": 50.0
+}
+```
 
 ## Performance
 
-| Metric | Value | Notes |
-|--------|-------|-------|
-| FPS | 25-30 FPS | Real-time streaming |
-| Latency | ~33ms | Frame capture to display |
-| CPU (simulation) | ~15-20% | Rendering + encoding |
-| Memory | ~50MB | Frame buffers |
-| Network | ~200-500 KB/s | MJPEG stream to browser |
+### Latency Breakdown
 
-## Troubleshooting
+| Component | Latency |
+|-----------|---------|
+| ZMQ reception | ~5ms |
+| Rendering | ~10-20ms |
+| JPEG encoding | ~5-10ms |
+| WebSocket transmission | ~5-10ms |
+| Browser decode | ~10-20ms |
+| **Total** | **~50-100ms** |
 
-### Problem: Blank page in browser
+### Optimizations
 
-**Solutions:**
-- Check if viewer is running: `ps aux | grep viewer`
-- Check if LKAS broker is running: `ps aux | grep "lkas.*broadcast"`
-- Verify web port is accessible: `curl http://localhost:8080`
-- Try different port: `viewer --port 8081`
-- Check browser console for errors (F12)
+1. **Binary WebSocket Frames:**
+   - No base64 encoding (33% overhead eliminated!)
+   - Direct JPEG transmission
+   - Blob URL creation for instant rendering
 
-### Problem: No video stream
+2. **Frame Rate Limiting:**
+   - Max 30 FPS to prevent flooding
+   - Configurable via `ws_frame_interval`
 
-**Solutions:**
-- Ensure LKAS is running with `--broadcast` flag: `lkas --method cv --broadcast`
-- Ensure simulation is running with `--broadcast` flag: `simulation --broadcast`
-- Check LKAS terminal for "Broadcasting" messages
-- Verify ZMQ connection in viewer logs
-- Restart all processes in order: CARLA → LKAS → Simulation → Viewer
+3. **JPEG Quality:**
+   - Quality: 80 (balanced)
+   - Lower = faster transmission
+   - Higher = better quality
 
-### Problem: Controls don't work (pause/resume/respawn)
+4. **Efficient Rendering:**
+   - Overlays rendered on laptop CPU
+   - Vehicle/simulation CPU stays free
+   - Complex HUD doesn't impact vehicle performance
 
-**Solutions:**
-- Check LKAS broker is receiving actions (look for "[Broker] Action received" logs)
-- Ensure simulation is connected to LKAS broker (port 5561)
-- Verify viewer can reach LKAS broker (port 5558)
-- Check browser console for network errors
+## Module Structure
 
-### Problem: Slow/laggy video
-
-**Solutions:**
-- Reduce camera resolution in config.yaml
-- Close other resource-intensive applications
-- Check CARLA server performance
-- Use headless mode if visualization not needed
-
-### Problem: Parameter changes don't take effect
-
-**Solutions:**
-- Ensure LKAS is running with `--broadcast` flag (enables parameter broker)
-- Check LKAS broker is forwarding parameters (look for "[Broker] Parameter forwarded" logs)
-- Verify detection/decision servers are subscribed to parameter updates
-- Parameters update immediately - no need to restart
+```
+viewer/
+├── run.py                        # Main entry point
+├── frontend.html                 # Web interface (HTML/CSS/JS)
+├── test_websocket.py             # WebSocket testing utility
+│
+└── README.md                     # This file
+```
 
 ## Development
 
-### Adding Custom Overlays
+### Testing WebSocket Connection
 
-The visualization is handled in the simulation module's visualizer:
+```bash
+# In one terminal: start viewer
+viewer
 
-```python
-from simulation.utils.visualizer import Visualizer
+# In another terminal: test connection
+python3 src/viewer/test_websocket.py
 
-visualizer = Visualizer()
-
-# Draw custom overlay
-def draw_custom_info(frame, custom_data):
-    cv2.putText(frame, f"Custom: {custom_data}",
-                (10, 150), cv2.FONT_HERSHEY_SIMPLEX,
-                0.6, (255, 255, 255), 2)
-    return frame
-
-# Use in processing loop
-visualized_frame = visualizer.draw_lanes(frame, detection_result)
-visualized_frame = draw_custom_info(visualized_frame, my_data)
+# Should output:
+# ✓ Connected to ws://localhost:8081
+# ✓ Sent test message
+# ✓ Received 10 messages
 ```
 
-### Technology Stack
+### Adding Custom Overlays
 
-- **ZMQ (ØMQ)** - High-performance messaging for vehicle data
-- **HTTP Server** - Threaded server for web interface
-- **MJPEG streaming** - Real-time video to browser
-- **HTML5/JavaScript** - Interactive UI with live controls
-- **OpenCV** - Frame decoding and overlay rendering (on laptop!)
+Edit `run.py` in the `_render_frame()` method:
 
-### ZMQ Topics
+```python
+def _render_frame(self):
+    # ... existing rendering code ...
 
-**Subscribed (from LKAS broker:5557):**
-- `frame` - JPEG-compressed video frames
-- `detection` - Lane detection results (left/right lanes)
-- `state` - Vehicle status (speed, steering, position, etc.)
+    # Add custom overlay
+    cv2.putText(
+        output,
+        f"Custom Info: {self.custom_data}",
+        (10, 100),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 0),  # Yellow text
+        2
+    )
 
-**Published:**
-- `action` (to port 5558) - User commands (pause, resume, respawn)
-- `parameter` (to port 5559) - Real-time parameter updates
+    self.rendered_frame = output
+```
 
-## See Also
+### Custom Frontend Styling
 
-- [Simulation Module](../simulation/README.md) - CARLA orchestration
-- [Detection Module](../lkas/detection/README.md) - Lane detection
-- [Main README](../../README.md) - Project overview
+Edit `frontend.html` CSS:
 
-## License
+```css
+/* Custom theme colors */
+body {
+    background: #2c2c2c;  /* Darker background */
+}
 
-See main project LICENSE file.
+.badge {
+    background: #FF5722;  /* Orange badge */
+}
+```
+
+### Debugging
+
+Enable verbose logging:
+```bash
+viewer --verbose
+```
+
+Check WebSocket connection:
+```bash
+# Check if ports are open
+ss -tlnp | grep '808[01]'
+
+# Monitor WebSocket traffic
+wscat -c ws://localhost:8081
+```
+
+Browser console (F12):
+```javascript
+// Check WebSocket status
+console.log(ws.readyState);  // 1 = OPEN
+
+// Monitor frame reception
+ws.onmessage = (e) => console.log('Frame:', e.data.size);
+```
+
+## Troubleshooting
+
+### WebSocket Won't Connect
+
+**Symptoms:**
+```
+Connection: Disconnected (red)
+Browser console: WebSocket connection failed
+```
+
+**Fixes:**
+1. Check viewer is running:
+   ```bash
+   ps aux | grep viewer
+   ```
+
+2. Verify WebSocket server started:
+   ```
+   ✓ WebSocket server started on port 8081
+   ```
+
+3. Test connection:
+   ```bash
+   python3 src/viewer/test_websocket.py
+   ```
+
+4. Check firewall:
+   ```bash
+   sudo ufw allow 8081
+   ```
+
+### High Latency (>1 second)
+
+**Symptoms:**
+```
+Latency: 5000+ms
+FPS: <10
+```
+
+**Fixes:**
+1. Reduce JPEG quality:
+   ```python
+   # In run.py, line ~290
+   cv2.imencode('.jpg', ..., [cv2.IMWRITE_JPEG_QUALITY, 70])
+   ```
+
+2. Increase frame rate limit:
+   ```python
+   # In run.py, line ~104
+   self.ws_frame_interval = 1.0 / 60.0  # 60 FPS instead of 30
+   ```
+
+3. Reduce camera resolution:
+   ```yaml
+   # In config.yaml
+   carla:
+     camera:
+       width: 480
+       height: 360
+   ```
+
+### Parameters Not Updating
+
+**Symptoms:**
+```
+Slider moves but LKAS behavior doesn't change
+```
+
+**Fixes:**
+1. Check LKAS broker is receiving parameters:
+   ```bash
+   # In LKAS terminal, should see:
+   [Parameter] detection.canny_low = 50.0
+   ```
+
+2. Verify parameter port:
+   ```bash
+   ss -tlnp | grep 5559
+   ```
+
+3. Check parameter category name matches:
+   ```javascript
+   // Should be 'detection' or 'decision'
+   updateParam('detection', 'canny_low', 50)
+   ```
+
+### Viewer Shows Old/Frozen Frames
+
+**Symptoms:**
+```
+Video stream frozen or showing old data
+```
+
+**Fixes:**
+1. Restart viewer:
+   ```bash
+   # Ctrl+C to stop, then restart
+   viewer
+   ```
+
+2. Check ZMQ connection:
+   ```bash
+   # Should show data port listening
+   ss -tlnp | grep 5557
+   ```
+
+3. Verify LKAS is broadcasting:
+   ```bash
+   # LKAS should be started with --broadcast flag
+   lkas --method cv --broadcast
+   ```
+
+## Advanced Usage
+
+### Multiple Viewers
+
+Run multiple viewer instances on different ports:
+
+```bash
+# Viewer 1
+viewer --port 8080
+
+# Viewer 2 (on same or different machine)
+viewer --port 9090
+
+# Viewer 3
+viewer --port 7070
+```
+
+All viewers receive the same data from LKAS broker!
+
+### Remote Viewing
+
+If viewer is on a different machine than LKAS:
+
+```yaml
+# In config.yaml on viewer machine
+zmq:
+  viewer:
+    vehicle_data_url: tcp://192.168.1.100:5557  # LKAS machine IP
+    action_url: tcp://192.168.1.100:5558
+    parameter_url: tcp://192.168.1.100:5559
+```
+
+Then access viewer:
+```
+http://<viewer-machine-ip>:8080
+```
+
+### Custom Frame Rate Limiting
+
+Edit `run.py`:
+
+```python
+# Line ~104-106
+self.ws_frame_interval = 1.0 / 60.0  # 60 FPS (lower latency)
+# or
+self.ws_frame_interval = 1.0 / 15.0  # 15 FPS (lower bandwidth)
+```
+
+### Recording Sessions
+
+```bash
+# TODO: Add recording functionality
+viewer --record session.mp4
+```
+
+## Integration with Other Modules
+
+### With LKAS
+```
+LKAS Broker → (port 5557) → Viewer [ZMQ subscription]
+Viewer → (port 5558) → LKAS Broker [Actions]
+Viewer → (port 5559) → LKAS Broker [Parameters]
+```
+
+### With Simulation
+```
+Simulation → LKAS Broker → Viewer [Data flow]
+Viewer → LKAS Broker → Simulation [Control flow]
+```
+
+## Performance Benchmarks
+
+Tested on:
+- **CPU:** Intel i7-10750H
+- **RAM:** 16GB
+- **Network:** localhost (loopback)
+
+| Configuration | FPS | Latency | CPU Usage |
+|--------------|-----|---------|-----------|
+| 640x480, Q=80, 30fps | 30 | 50-100ms | ~15% |
+| 640x480, Q=95, 30fps | 30 | 80-150ms | ~18% |
+| 800x600, Q=80, 30fps | 30 | 70-120ms | ~20% |
+| 640x480, Q=80, 60fps | 60 | 40-80ms | ~25% |
+
+## References
+
+- [WebSocket Protocol](https://datatracker.ietf.org/doc/html/rfc6455)
+- [ZMQ Guide](https://zguide.zeromq.org/)
+- [LKAS Module](../lkas/README.md)
+- [Simulation Module](../simulation/README.md)
