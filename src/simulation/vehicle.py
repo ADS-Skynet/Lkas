@@ -164,7 +164,7 @@ class VehicleManager:
 
         spawn_point = self.spawn_points[self.current_spawn_index]
         self.vehicle.set_transform(spawn_point)
-        print(f"✓ Teleported to spawn point {self.current_spawn_index}")
+        # print(f"✓ Teleported to spawn point {self.current_spawn_index}")
         return True
 
     def apply_control(
