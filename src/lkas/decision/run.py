@@ -116,14 +116,16 @@ class DecisionServer:
         self.last_print_time = time.time()
 
         # Setup parameter updates if enabled
-        self.param_subscriber = None
+        self.param_client = None
         if enable_parameter_updates:
-            # Lazy import to avoid circular dependency
-            from simulation.integration.zmq_broadcast import ParameterSubscriber
+            from lkas.integration.zmq import ParameterClient
 
             print(f"\nSetting up real-time parameter updates...")
-            self.param_subscriber = ParameterSubscriber(connect_url=parameter_broker_url)
-            self.param_subscriber.register_callback('decision', self._on_parameter_update)
+            self.param_client = ParameterClient(
+                category='decision',
+                broker_url=parameter_broker_url
+            )
+            self.param_client.register_callback(self._on_parameter_update)
             print(f"✓ Parameter updates enabled")
 
         print("\n" + "=" * 60)
@@ -174,8 +176,8 @@ class DecisionServer:
             while self.running:
                 try:
                     # Poll for parameter updates (non-blocking)
-                    if self.param_subscriber:
-                        self.param_subscriber.poll()
+                    if self.param_client:
+                        self.param_client.poll()
 
                     # Read detection from shared memory (non-blocking)
                     detection = self.detection_channel.read()
@@ -228,9 +230,9 @@ class DecisionServer:
         """Stop the server and cleanup."""
         self.running = False
 
-        # Close parameter subscriber
-        if self.param_subscriber:
-            self.param_subscriber.close()
+        # Close parameter client
+        if self.param_client:
+            self.param_client.close()
 
         self.detection_channel.close()
         self.control_channel.close()

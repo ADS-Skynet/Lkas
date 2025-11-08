@@ -464,18 +464,34 @@ class ActionSubscriber:
     """
     Subscriber: Receives actions on vehicle/simulation.
 
-    Runs on vehicle. Receives commands from web viewer.
+    Runs on vehicle. Receives commands from web viewer or LKAS broker.
     """
 
-    def __init__(self, bind_url: str = "tcp://*:5558"):
-        """Initialize action subscriber."""
+    def __init__(self, bind_url: str = "tcp://*:5558", connect_mode: bool = False):
+        """
+        Initialize action subscriber.
+
+        Args:
+            bind_url: ZMQ URL to bind/connect to
+            connect_mode: If True, connect as client (receive from LKAS broker).
+                         If False, bind as server (old architecture, for backward compatibility).
+        """
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.SUB)
-        self.socket.bind(bind_url)
+
+        if connect_mode:
+            # Connect to LKAS broker (new architecture)
+            # Convert tcp://*:5558 to tcp://localhost:5561 (LKAS action forward port)
+            connect_url = "tcp://localhost:5561"  # LKAS broker forwards to this port
+            self.socket.connect(connect_url)
+            print(f"✓ Action subscriber connected to {connect_url}")
+        else:
+            # Bind as server (old architecture, for backward compatibility)
+            self.socket.bind(bind_url)
+            print(f"✓ Action subscriber listening on {bind_url}")
+
         self.socket.setsockopt(zmq.SUBSCRIBE, b'action')
         self.socket.setsockopt(zmq.RCVTIMEO, 100)
-
-        print(f"✓ Action subscriber listening on {bind_url}")
 
         # Callbacks
         self.action_callbacks: Dict[str, Callable] = {}
@@ -492,23 +508,30 @@ class ActionSubscriber:
             topic = parts[0].decode('utf-8')
             data = json.loads(parts[1].decode('utf-8'))
 
+            print(f"[ActionSubscriber] Received topic: {topic}, data: {data}")
+
             if topic == 'action':
                 action = data['action']
                 params = data.get('params', {})
 
-                print(f"[Action] Received: {action}")
+                print(f"[ActionSubscriber] Processing action: {action}")
 
                 if action in self.action_callbacks:
-                    self.action_callbacks[action](**params)
+                    print(f"[ActionSubscriber] Calling handler for: {action}")
+                    result = self.action_callbacks[action](**params)
+                    print(f"[ActionSubscriber] Handler result: {result}")
                 else:
-                    print(f"  ⚠ Unknown action: {action}")
+                    print(f"[ActionSubscriber] ⚠ Unknown action: {action}")
+                    print(f"[ActionSubscriber] Available actions: {list(self.action_callbacks.keys())}")
 
             return True
 
         except zmq.Again:
             return False
         except Exception as e:
-            # print(f"⚠ Error receiving action: {e}")
+            print(f"[ActionSubscriber] ⚠ Error receiving action: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def close(self):
@@ -524,16 +547,26 @@ class ParameterPublisher:
     Runs in viewer process. Publishes real-time parameter adjustments.
     """
 
-    def __init__(self, bind_url: str = "tcp://*:5559"):
+    def __init__(self, bind_url: str = "tcp://*:5559", connect_mode: bool = False):
         """
         Initialize parameter publisher.
 
         Args:
-            bind_url: ZMQ URL to bind to (acts as server)
+            bind_url: ZMQ URL to bind/connect to
+            connect_mode: If True, connect as client. If False, bind as server (default)
+                         Use connect_mode=True when LKAS broker is running (new architecture)
         """
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.PUB)
-        self.socket.bind(bind_url)
+
+        if connect_mode:
+            # Connect to LKAS broker (new architecture)
+            # Convert tcp://*:5559 to tcp://localhost:5559 for connect
+            connect_url = bind_url.replace("tcp://*:", "tcp://localhost:")
+            self.socket.connect(connect_url)
+        else:
+            # Bind as server (old architecture, for backward compatibility)
+            self.socket.bind(bind_url)
 
         # Give ZMQ time to establish
         time.sleep(0.1)
@@ -547,24 +580,39 @@ class ParameterPublisher:
             parameter: Parameter name
             value: New value
         """
-        update = ParameterUpdate(
-            category=category,
-            parameter=parameter,
-            value=value,
-            timestamp=time.time()
-        )
+        try:
+            if self.socket.closed:
+                return
 
-        message = asdict(update)
+            update = ParameterUpdate(
+                category=category,
+                parameter=parameter,
+                value=value,
+                timestamp=time.time()
+            )
 
-        self.socket.send_multipart([
-            b'parameter',
-            json.dumps(message).encode('utf-8')
-        ])
+            message = asdict(update)
+
+            self.socket.send_multipart([
+                b'parameter',
+                json.dumps(message).encode('utf-8')
+            ], flags=zmq.NOBLOCK)
+        except zmq.error.Again:
+            # Socket is full, skip this message
+            pass
+        except Exception as e:
+            # Don't crash on send errors
+            print(f"[ParameterPublisher] Error sending parameter: {e}")
 
     def close(self):
         """Close publisher."""
-        self.socket.close()
-        self.context.term()
+        try:
+            if not self.socket.closed:
+                self.socket.setsockopt(zmq.LINGER, 0)
+                self.socket.close()
+            self.context.term()
+        except:
+            pass
 
 
 class ParameterSubscriber:
@@ -709,6 +757,67 @@ class ParameterBroker:
         self.sub_socket.close()
         self.pub_socket.close()
         self.context.term()
+
+
+class VehicleStatusPublisher:
+    """
+    Publisher: Sends vehicle status TO the LKAS broker.
+
+    Runs in simulation/orchestrator. Sends vehicle state to LKAS broker
+    which then broadcasts to all viewers.
+    """
+
+    def __init__(self, lkas_broker_url: str = "tcp://localhost:5562"):
+        """
+        Initialize vehicle status publisher.
+
+        Args:
+            lkas_broker_url: URL to send vehicle status to LKAS broker
+        """
+        self.context = zmq.Context()
+
+        # Publisher socket (connects to LKAS broker's subscriber)
+        self.pub_socket = self.context.socket(zmq.PUB)
+        self.pub_socket.connect(lkas_broker_url)
+        self.pub_socket.setsockopt(zmq.LINGER, 0)  # Don't block on close
+        self.pub_socket.setsockopt(zmq.SNDHWM, 10)  # High water mark
+
+        time.sleep(0.1)  # Let socket establish
+
+        print(f"✓ Vehicle status publisher connected to LKAS broker: {lkas_broker_url}")
+
+    def send_state(self, state: VehicleState):
+        """
+        Send vehicle state to LKAS broker.
+
+        Args:
+            state: Vehicle state data
+        """
+        try:
+            if self.pub_socket.closed:
+                return
+
+            message = asdict(state)
+
+            # Send multipart: [topic, json_data]
+            self.pub_socket.send_multipart([
+                b'vehicle_status',
+                json.dumps(message).encode('utf-8')
+            ], flags=zmq.NOBLOCK)
+
+        except zmq.Again:
+            # Socket full, skip message (prefer real-time over buffering)
+            pass
+        except Exception as e:
+            # Silently ignore send errors (broker might not be ready yet)
+            pass
+
+    def close(self):
+        """Close publisher."""
+        if self.pub_socket:
+            self.pub_socket.close()
+        if self.context:
+            self.context.term()
 
 
 # Example usage

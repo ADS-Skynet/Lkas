@@ -16,9 +16,8 @@ from simulation import CARLAConnection, VehicleManager, CameraSensor
 from lkas import LKAS
 from lkas.detection.integration.messages import ControlMessage, ControlMode
 from simulation.integration.zmq_broadcast import (
-    VehicleBroadcaster,
+    VehicleStatusPublisher,
     ActionSubscriber,
-    DetectionData,
     VehicleState,
     ParameterBroker,
 )
@@ -81,7 +80,7 @@ class SimulationOrchestrator:
         self.camera: CameraSensor | None = None
         # LKAS system (detection + decision)
         self.lkas: LKAS | None = None
-        self.broadcaster: VehicleBroadcaster | None = None
+        self.status_publisher: VehicleStatusPublisher | None = None
         self.action_subscriber: ActionSubscriber | None = None
         self.parameter_broker: ParameterBroker | None = None
 
@@ -113,8 +112,8 @@ class SimulationOrchestrator:
 
         self._setup_lkas()
 
-        if self.config.enable_broadcast:
-            self._setup_broadcasting()
+        # Setup ZMQ communication with LKAS broker
+        self._setup_zmq_communication()
 
         self._setup_event_handlers()
 
@@ -200,21 +199,37 @@ class SimulationOrchestrator:
             print(f"  Tip: Make sure detection and decision servers are running")
             raise
 
-    def _setup_broadcasting(self):
-        """Setup ZMQ broadcasting for remote viewer."""
-        print("\nInitializing ZMQ broadcaster for remote viewer...")
-        self.broadcaster = VehicleBroadcaster(bind_url=self.config.broadcast_url)
-        self.action_subscriber = ActionSubscriber(bind_url=self.config.action_url)
-        print("✓ ZMQ broadcaster ready")
+    def _setup_zmq_communication(self):
+        """Setup ZMQ communication with LKAS broker."""
+        try:
+            print("\n[5/5] Setting up ZMQ communication with LKAS broker...")
 
-        # Setup parameter broker if enabled
-        if self.config.enable_parameter_broker:
-            print("\nInitializing parameter broker...")
-            self.parameter_broker = ParameterBroker(
-                viewer_url=self.config.parameter_viewer_url,
-                servers_url=self.config.parameter_servers_url
-            )
-            print("✓ Parameter broker ready")
+            # Setup vehicle status publisher (sends status TO LKAS broker)
+            try:
+                self.status_publisher = VehicleStatusPublisher(lkas_broker_url="tcp://localhost:5562")
+                print(f"✓ Vehicle status publisher connected to LKAS broker")
+            except Exception as e:
+                print(f"⚠ Failed to connect status publisher: {e}")
+                print(f"  Simulation will run but viewer won't see vehicle status")
+                self.status_publisher = None
+
+            # Setup action subscriber (receives actions FROM LKAS broker)
+            try:
+                self.action_subscriber = ActionSubscriber(
+                    bind_url=self.config.action_url,
+                    connect_mode=True  # Connect to LKAS broker (port 5561)
+                )
+                print(f"✓ Action subscriber connected to LKAS broker")
+            except Exception as e:
+                print(f"⚠ Failed to connect action subscriber: {e}")
+                print(f"  Actions (pause/resume/respawn) will be disabled")
+                self.action_subscriber = None
+
+            print("✓ ZMQ communication setup complete")
+        except Exception as e:
+            print(f"✗ Failed to setup ZMQ communication: {e}")
+            self.status_publisher = None
+            self.action_subscriber = None
 
     def _setup_event_handlers(self):
         """Setup event handlers for actions."""
@@ -284,13 +299,9 @@ class SimulationOrchestrator:
                 if self.action_subscriber:
                     self.action_subscriber.poll()
 
-                # Poll parameter broker to forward parameter updates
-                if self.parameter_broker:
-                    self.parameter_broker.poll()
-
-                # Broadcast state periodically (even when paused)
-                if self.broadcaster and time.time() - last_state_broadcast > 1.0:
-                    self._broadcast_state_only()
+                # Send vehicle status periodically (even when paused)
+                if self.status_publisher and time.time() - last_state_broadcast > 1.0:
+                    self._send_vehicle_status()
                     last_state_broadcast = time.time()
 
                 # Update footer periodically
@@ -332,9 +343,10 @@ class SimulationOrchestrator:
                         control.brake
                     )
 
-                # Broadcast to remote viewers
-                if self.broadcaster:
-                    self._broadcast_data(image, detection, control)
+                # Send vehicle status to LKAS broker (which broadcasts to viewers)
+                # Note: Frames and detection are sent by LKAS directly
+                if self.status_publisher:
+                    self._send_vehicle_status(control)
 
                 self.frame_count += 1
 
@@ -365,65 +377,34 @@ class SimulationOrchestrator:
 
         return control
 
-    def _broadcast_data(self, image, detection, control):
-        """Broadcast data to remote viewers."""
-        # Send image
-        self.broadcaster.send_frame(image, self.frame_count)
+    def _send_vehicle_status(self, control=None):
+        """
+        Send vehicle status to LKAS broker.
 
-        # Send detection
-        if detection:
-            detection_data = DetectionData(
-                left_lane={
-                    'x1': float(detection.left_lane.x1),
-                    'y1': float(detection.left_lane.y1),
-                    'x2': float(detection.left_lane.x2),
-                    'y2': float(detection.left_lane.y2),
-                    'confidence': float(detection.left_lane.confidence)
-                } if detection.left_lane else None,
-                right_lane={
-                    'x1': float(detection.right_lane.x1),
-                    'y1': float(detection.right_lane.y1),
-                    'x2': float(detection.right_lane.x2),
-                    'y2': float(detection.right_lane.y2),
-                    'confidence': float(detection.right_lane.confidence)
-                } if detection.right_lane else None,
-                processing_time_ms=detection.processing_time_ms if hasattr(detection, 'processing_time_ms') else 0.0,
-                frame_id=self.frame_count
-            )
-            self.broadcaster.send_detection(detection_data)
-        else:
-            print("no detection data to send")
-
-        # Send vehicle state
+        Args:
+            control: Control command (optional, may be None when paused)
+        """
         velocity = self.vehicle_mgr.get_velocity()
         speed_ms = (velocity.x**2 + velocity.y**2 + velocity.z**2)**0.5 if velocity else 0.0
 
+        # Get vehicle transform
+        transform = self.vehicle_mgr.get_vehicle().get_transform()
+        location = transform.location
+        rotation = transform.rotation
+
+        # Create vehicle state message
         vehicle_state = VehicleState(
-            steering=float(control.steering),
-            throttle=float(control.throttle),
-            brake=float(control.brake),
+            steering=float(control.steering) if control else 0.0,
+            throttle=float(control.throttle) if control else 0.0,
+            brake=float(control.brake) if control else 0.0,
             speed_kmh=float(speed_ms * 3.6),
-            position=None,
-            rotation=None,
+            position=(location.x, location.y, location.z),
+            rotation=(rotation.pitch, rotation.yaw, rotation.roll),
             paused=self.paused
         )
-        self.broadcaster.send_state(vehicle_state)
 
-    def _broadcast_state_only(self):
-        """Broadcast just the vehicle state (used for periodic updates when paused)."""
-        velocity = self.vehicle_mgr.get_velocity()
-        speed_ms = (velocity.x**2 + velocity.y**2 + velocity.z**2)**0.5 if velocity else 0.0
-
-        vehicle_state = VehicleState(
-            steering=0.0,  # Not meaningful when paused
-            throttle=0.0,
-            brake=0.0,
-            speed_kmh=float(speed_ms * 3.6),
-            position=None,
-            rotation=None,
-            paused=self.paused
-        )
-        self.broadcaster.send_state(vehicle_state)
+        # Send to LKAS broker (which will broadcast to all viewers)
+        self.status_publisher.send_state(vehicle_state)
 
     def _print_status(self, last_print, detection, control):
         """Print status line."""
@@ -472,16 +453,11 @@ class SimulationOrchestrator:
         table = Table.grid(padding=(0, 1))
         table.add_column(style="cyan", no_wrap=True)
 
-        # Get broadcaster stats if available
-        broadcast_info = ""
-        if self.broadcaster and self.broadcaster.current_fps > 0:
-            stats = self.broadcaster.get_stats()
-            broadcast_info = f" [dim]|[/dim] [cyan]Broadcast: {stats['fps']:.1f} FPS, Frame {stats['frame_id']}, {stats['kb']:.1f} KB[/cyan]"
-
+        # Show pause/running status
         if self.paused:
-            table.add_row(f"[bold yellow]■ PAUSED[/bold yellow]{broadcast_info}")
+            table.add_row(f"[bold yellow]■ PAUSED[/bold yellow]")
         else:
-            table.add_row(f"[bold green]● RUNNING[/bold green]{broadcast_info}")
+            table.add_row(f"[bold green]● RUNNING[/bold green]")
 
         return table
 
@@ -506,9 +482,12 @@ class SimulationOrchestrator:
         self._clear_footer()
         print("\nCleaning up...")
 
-        # Cleanup parameter broker
-        if self.parameter_broker:
-            self.parameter_broker.close()
+        # Cleanup ZMQ communication
+        if self.status_publisher:
+            self.status_publisher.close()
+
+        if self.action_subscriber:
+            self.action_subscriber.close()
 
         # Cleanup LKAS
         if self.lkas:

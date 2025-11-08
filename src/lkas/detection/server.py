@@ -105,14 +105,16 @@ class DetectionServer:
             self.last_print_time = time.time()
 
             # Setup parameter updates if enabled
-            self.param_subscriber = None
+            self.param_client = None
             if enable_parameter_updates:
-                # Lazy import to avoid circular dependency
-                from simulation.integration.zmq_broadcast import ParameterSubscriber
+                from lkas.integration.zmq import ParameterClient
 
                 print(f"\nSetting up real-time parameter updates...")
-                self.param_subscriber = ParameterSubscriber(connect_url=parameter_broker_url)
-                self.param_subscriber.register_callback('detection', self._on_parameter_update)
+                self.param_client = ParameterClient(
+                    category='detection',
+                    broker_url=parameter_broker_url
+                )
+                self.param_client.register_callback(self._on_parameter_update)
                 print(f"✓ Parameter updates enabled")
 
             print("\n" + "=" * 60)
@@ -208,8 +210,8 @@ class DetectionServer:
         try:
             while self.running:
                 # Poll for parameter updates (non-blocking)
-                if self.param_subscriber:
-                    self.param_subscriber.poll()
+                if self.param_client:
+                    self.param_client.poll()
 
                 # Read image from shared memory (non-blocking with timeout)
                 image_msg = self.image_channel.read_blocking(timeout=0.1, copy=True)
@@ -249,9 +251,9 @@ class DetectionServer:
         """Stop the server and cleanup resources."""
         self.running = False
 
-        # Close parameter subscriber
-        if self.param_subscriber:
-            self.param_subscriber.close()
+        # Close parameter client
+        if self.param_client:
+            self.param_client.close()
 
         # Close channels (check if they exist)
         if self.image_channel:

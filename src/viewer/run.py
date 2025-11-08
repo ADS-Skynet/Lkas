@@ -42,27 +42,34 @@ class ZMQWebViewer:
                  action_url: str = "tcp://localhost:5558",
                  parameter_bind_url: str = "tcp://*:5559",
                  web_port: int = 8080,
-                 verbose: bool = False):
+                 verbose: bool = False,
+                 lkas_mode: bool = True):
         """
         Initialize ZMQ web viewer.
 
         Args:
             vehicle_url: ZMQ URL to receive data from vehicle
             action_url: ZMQ URL to send actions to vehicle
-            parameter_bind_url: ZMQ URL to bind for parameter updates (acts as server)
+            parameter_bind_url: ZMQ URL to bind/connect for parameter updates
             web_port: HTTP port for web interface
             verbose: Enable verbose HTTP request logging
+            lkas_mode: If True, connect to LKAS broker (default, new architecture).
+                      If False, bind as server for simulation (old architecture).
         """
         self.vehicle_url = vehicle_url
         self.action_url = action_url
         self.parameter_bind_url = parameter_bind_url
         self.web_port = web_port
         self.verbose = verbose
+        self.lkas_mode = lkas_mode
 
         # ZMQ communication
         self.subscriber = ViewerSubscriber(vehicle_url)
         self.action_publisher = ActionPublisher(action_url)
-        self.parameter_publisher = ParameterPublisher(bind_url=parameter_bind_url)
+        self.parameter_publisher = ParameterPublisher(
+            bind_url=parameter_bind_url,
+            connect_mode=lkas_mode  # Connect to LKAS broker in new architecture
+        )
 
         # Visualization
         self.visualizer = LKASVisualizer()
@@ -87,7 +94,7 @@ class ZMQWebViewer:
         print(f"{'='*60}")
         print(f"  Receiving from: {vehicle_url}")
         print(f"  Sending actions to: {action_url}")
-        print(f"  Parameter server: {parameter_bind_url}")
+        print(f"  Parameter server: {parameter_bind_url} ({'connect' if lkas_mode else 'bind'} mode)")
         print(f"  Web interface: http://localhost:{web_port}")
         print(f"{'='*60}\n")
 
@@ -816,6 +823,8 @@ def main():
                        help="HTTP port for web interface (overrides config, default: from config.yaml)")
     parser.add_argument('--verbose', action='store_true',
                        help="Enable verbose HTTP request logging")
+    parser.add_argument('--simulation-mode', action='store_true',
+                       help="Use simulation mode (bind as server). Default is LKAS mode (connect to broker).")
 
     args = parser.parse_args()
 
@@ -825,13 +834,17 @@ def main():
     # Determine web port: CLI arg overrides config
     web_port = args.port if args.port is not None else config.visualization.web_port
 
+    # Determine mode: LKAS mode (connect to broker) is default
+    lkas_mode = not args.simulation_mode
+
     # Create and run viewer
     viewer = ZMQWebViewer(
         vehicle_url=args.vehicle,
         action_url=args.actions,
         parameter_bind_url=args.parameters,
         web_port=web_port,
-        verbose=args.verbose
+        verbose=args.verbose,
+        lkas_mode=lkas_mode
     )
 
     viewer.start()

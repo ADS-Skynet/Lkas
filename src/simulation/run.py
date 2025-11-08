@@ -97,11 +97,11 @@ def parse_arguments() -> argparse.Namespace:
         help="Shared memory name for control commands (default: control_commands)",
     )
 
-    # ZMQ Broadcasting options
+    # ZMQ Broadcasting options (legacy - always enabled now)
     parser.add_argument(
         "--broadcast",
         action="store_true",
-        help="Enable ZMQ broadcasting for remote viewers",
+        help="(Legacy flag - broadcasting is now always enabled for viewer support)",
     )
     parser.add_argument(
         "--broadcast-url",

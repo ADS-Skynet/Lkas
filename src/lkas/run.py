@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Optional, List
 
 from lkas.utils.terminal import TerminalDisplay, OrderedLogger
+from lkas.detection.core.config import Config
 
 
 class LKASLauncher:
@@ -43,6 +44,7 @@ class LKASLauncher:
         detection_shm_name: str = "detection_results",
         control_shm_name: str = "control_commands",
         verbose: bool = False,
+        broadcast: bool = False,
     ):
         """
         Initialize LKAS launcher.
@@ -55,6 +57,7 @@ class LKASLauncher:
             detection_shm_name: Shared memory name for detection results
             control_shm_name: Shared memory name for control commands
             verbose: Enable verbose output (FPS stats, latency info)
+            broadcast: Enable ZMQ broadcasting for remote viewers
         """
         self.method = method
         self.config = config
@@ -63,10 +66,20 @@ class LKASLauncher:
         self.detection_shm_name = detection_shm_name
         self.control_shm_name = control_shm_name
         self.verbose = verbose
+        self.broadcast = broadcast
 
         self.detection_process: Optional[subprocess.Popen] = None
         self.decision_process: Optional[subprocess.Popen] = None
         self.running = False
+        self.broker = None
+
+        # Shared memory channels for broadcasting (only if broadcast enabled)
+        self.image_channel = None
+        self.detection_channel = None
+
+        # Load config for shared memory setup
+        self.system_config = Config.from_file(self.config) if self.config else Config()
+
 
         # Terminal display with persistent footer
         self.enable_footer = True
@@ -152,6 +165,8 @@ class LKASLauncher:
         self.terminal.print(f"  Image SHM: {self.image_shm_name}")
         self.terminal.print(f"  Detection SHM: {self.detection_shm_name}")
         self.terminal.print(f"  Control SHM: {self.control_shm_name}")
+        if self.broadcast:
+            self.terminal.print(f"  ZMQ Broadcast: Enabled")
         self.terminal.print("=" * 70)
         self.terminal.print("")
 
@@ -248,12 +263,128 @@ class LKASLauncher:
             decision_connected=self.decision_connected
         )
 
+    def _setup_broker(self):
+        """Setup ZMQ broker for routing parameters and actions, and shared memory readers for broadcasting."""
+        if not self.broadcast:
+            return
+
+        try:
+            from lkas.integration.zmq import LKASBroker
+
+            self.terminal.print("\nInitializing ZMQ broker (routing & broadcasting)...")
+            self.broker = LKASBroker()
+            self.terminal.print("")
+        except Exception as e:
+            self.terminal.print(f"✗ Failed to initialize ZMQ broker: {e}")
+            self.terminal.print("  Continuing without broker...")
+            self.broker = None
+
+    def _setup_shared_memory_readers(self):
+        """
+        Setup shared memory readers for broadcasting frames and detection.
+        Called after servers are initialized, but connection is lazy (on first use).
+        """
+        if not self.broadcast or not self.broker:
+            return
+
+        # Don't connect immediately - wait for simulation to create shared memory
+        # Connection will happen on first _broadcast_data() call
+        self.terminal.print("\n✓ Broadcasting enabled - will connect to shared memory when available")
+
+    def _broadcast_data(self):
+        """
+        Read from shared memory and broadcast frames/detection to viewers.
+        Called periodically in the main loop.
+        Lazy-connects to shared memory on first successful read.
+        """
+        if not self.broker:
+            return
+
+        # Lazy connection to image channel
+        if self.image_channel is None:
+            try:
+                from lkas.detection.integration.shared_memory_detection import SharedMemoryImageChannel
+                self.image_channel = SharedMemoryImageChannel(
+                    name=self.image_shm_name,
+                    shape=(self.system_config.camera.height, self.system_config.camera.width, 3),
+                    create=False,  # Reader mode
+                    retry_count=1,  # Single attempt
+                    retry_delay=0.0,
+                )
+                self.terminal.print(f"✓ Connected to image channel: {self.image_shm_name}")
+            except Exception:
+                pass  # Will retry on next call
+
+        # Lazy connection to detection channel
+        if self.detection_channel is None:
+            try:
+                from lkas.detection.integration.shared_memory_detection import SharedMemoryDetectionChannel
+                self.detection_channel = SharedMemoryDetectionChannel(
+                    name=self.detection_shm_name,
+                    create=False,  # Reader mode
+                    retry_count=1,  # Single attempt
+                    retry_delay=0.0,
+                )
+                self.terminal.print(f"✓ Connected to detection channel: {self.detection_shm_name}")
+            except Exception:
+                pass  # Will retry on next call
+
+        # Try to read and broadcast image
+        if self.image_channel:
+            try:
+                image_msg = self.image_channel.read(copy=False)  # Non-blocking read
+                if image_msg is not None:
+                    self.broker.broadcast_frame(
+                        image_msg.image,
+                        image_msg.frame_id,
+                        jpeg_quality=85
+                    )
+            except Exception:
+                pass  # Silently ignore read errors
+
+        # Try to read and broadcast detection
+        if self.detection_channel:
+            try:
+                detection_msg = self.detection_channel.read()  # Non-blocking read
+                if detection_msg is not None:
+                    # Convert detection message to viewer format (line segments, not arrays)
+                    # Viewer expects DetectionData: {left_lane, right_lane, processing_time_ms, frame_id}
+                    # Each lane: {x1, y1, x2, y2, confidence} or None
+                    detection_data = {
+                        'left_lane': {
+                            'x1': float(detection_msg.left_lane.x1),
+                            'y1': float(detection_msg.left_lane.y1),
+                            'x2': float(detection_msg.left_lane.x2),
+                            'y2': float(detection_msg.left_lane.y2),
+                            'confidence': float(detection_msg.left_lane.confidence)
+                        } if detection_msg.left_lane is not None else None,
+                        'right_lane': {
+                            'x1': float(detection_msg.right_lane.x1),
+                            'y1': float(detection_msg.right_lane.y1),
+                            'x2': float(detection_msg.right_lane.x2),
+                            'y2': float(detection_msg.right_lane.y2),
+                            'confidence': float(detection_msg.right_lane.confidence)
+                        } if detection_msg.right_lane is not None else None,
+                        'processing_time_ms': detection_msg.processing_time_ms,
+                        'frame_id': detection_msg.frame_id,
+                    }
+                    self.broker.broadcast_detection(detection_data, detection_msg.frame_id)
+                    # Log successful broadcast every 100 frames
+                    if detection_msg.frame_id % 100 == 0:
+                        self.terminal.print(f"[green]✓ Broadcasting detection: frame {detection_msg.frame_id}, L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None}[/green]")
+            except Exception as e:
+                # Log errors to help diagnose issues
+                self.terminal.print(f"[yellow]Warning: Failed to broadcast detection: {e}[/yellow]")
+
     def run(self):
         """Start both servers and manage their lifecycle."""
         self._print_header()
 
         # Open log file
         self.log_file = open("lkas_run.log", "w", buffering=1)
+
+        # Setup ZMQ broker if enabled
+        self._setup_broker()
 
         # Initialize footer
         self.terminal.init_footer()
@@ -352,6 +483,9 @@ class LKASLauncher:
             # Exit buffering mode - from now on, print messages immediately
             self.buffering_mode = False
 
+            # Setup shared memory readers for broadcasting (after servers are ready)
+            self._setup_shared_memory_readers()
+
             self.terminal.print("\n" + "=" * 70)
             self.terminal.print("System running - Press Ctrl+C to stop")
             self.terminal.print("")
@@ -369,6 +503,14 @@ class LKASLauncher:
 
             # Main loop - multiplex output from both processes
             while self.running:
+                # Poll broker for parameter updates and action requests
+                if self.broker:
+                    self.broker.poll()
+
+                # Broadcast frames and detection data to viewers
+                if self.broadcast:
+                    self._broadcast_data()
+
                 # Read output from both processes (use print_immediate for runtime)
                 self._read_process_output(self.detection_process, "DETECTION", self.detection_logger)
                 self._read_process_output(self.decision_process, "DECISION ", self.decision_logger)
@@ -417,6 +559,23 @@ class LKASLauncher:
         self.running = False
 
         self.terminal.print("\nStopping servers...")
+
+        # Close shared memory readers
+        if self.image_channel:
+            try:
+                self.image_channel.close()
+            except:
+                pass
+        if self.detection_channel:
+            try:
+                self.detection_channel.close()
+            except:
+                pass
+
+        # Stop broker
+        if self.broker:
+            self.broker.close()
+            self.broker = None
 
         # Stop decision server first (consumer)
         if self.decision_process and self.decision_process.poll() is None:
@@ -495,6 +654,11 @@ def main():
         action="store_true",
         help="Enable verbose output (FPS stats, latency info)",
     )
+    parser.add_argument(
+        "--broadcast",
+        action="store_true",
+        help="Enable ZMQ broadcasting for remote viewers (parameter updates, state, actions)",
+    )
 
     args = parser.parse_args()
 
@@ -507,6 +671,7 @@ def main():
         detection_shm_name=args.detection_shm_name,
         control_shm_name=args.control_shm_name,
         verbose=args.verbose,
+        broadcast=args.broadcast,
     )
 
     return launcher.run()
