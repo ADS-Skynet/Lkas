@@ -171,9 +171,12 @@ class LKASLauncher:
         self.detection_logger = OrderedLogger(subprocess_prefix, self.terminal)
         self.decision_logger = OrderedLogger(subprocess_prefix, self.terminal)
 
-        # Connection tracking
-        self.detection_connected = False
-        self.decision_connected = False
+        # Shared memory status tracking for footer
+        self.shm_status = {
+            self.image_shm_name: False,
+            self.detection_shm_name: False,
+            self.control_shm_name: False,
+        }
 
         # Initialization phase tracking
         self.buffering_mode = True
@@ -291,11 +294,8 @@ class LKASLauncher:
                         if not stripped:
                             continue
 
-                        # Mark as connected when we receive any output
-                        if "DETECTION" in prefix and not self.detection_connected:
-                            self._update_footer()
-                        elif "DECISION" in prefix and not self.decision_connected:
-                            self._update_footer()
+                        # Track shared memory connections from subprocess output
+                        self._check_shm_connection(stripped)
 
                         # Print message (buffer or print depending on mode)
                         if self.buffering_mode:
@@ -323,13 +323,8 @@ class LKASLauncher:
                         if not stripped:
                             continue
 
-                        # Mark as connected when we receive any output
-                        if "DETECTION" in prefix and not self.detection_connected:
-                            # self.detection_connected = True
-                            self._update_footer()
-                        elif "DECISION" in prefix and not self.decision_connected:
-                            # self.decision_connected = True
-                            self._update_footer()
+                        # Track shared memory connections from subprocess output
+                        self._check_shm_connection(stripped)
 
                         # Print message (buffer or print depending on mode)
                         if self.buffering_mode:
@@ -341,14 +336,40 @@ class LKASLauncher:
                 pass
 
     def _update_footer(self):
-        """Update the persistent footer with connection status from both processes."""
+        """Update the persistent footer with shared memory status."""
         if not self.enable_footer:
             return
 
-        self.terminal.update_footer(
-            detection_connected=self.detection_connected,
-            decision_connected=self.decision_connected
-        )
+        self.terminal.update_footer(shm_status=self.shm_status)
+
+    def _check_shm_connection(self, message: str):
+        """
+        Parse subprocess output to track shared memory connections.
+
+        Args:
+            message: Log message from subprocess
+        """
+        # Look for various shared memory creation/connection messages
+        keywords = [
+            "Created shared memory:",
+            "Connected to shared memory:",
+            "Created detection shared memory:",
+            "Connected to detection shared memory:",
+            "Created control shared memory:",
+            "Connected to control shared memory:",
+        ]
+
+        for keyword in keywords:
+            if keyword in message:
+                # Extract the shared memory name
+                parts = message.split(keyword)
+                if len(parts) > 1:
+                    shm_name = parts[1].strip().split()[0]  # Get first word after keyword
+                    # Update status if this is one of our tracked shared memories
+                    if shm_name in self.shm_status:
+                        self.shm_status[shm_name] = True
+                        self._update_footer()
+                        break
 
     def _setup_broker(self):
         """Setup ZMQ broker for routing parameters and actions, and shared memory readers for broadcasting."""
@@ -359,7 +380,7 @@ class LKASLauncher:
             from lkas.integration.zmq import LKASBroker
 
             self.terminal.print("\nInitializing ZMQ broker (routing & broadcasting)...")
-            self.broker = LKASBroker()
+            self.broker = LKASBroker(verbose=self.verbose)
             self.terminal.print("")
         except Exception as e:
             self.terminal.print(f"✗ Failed to initialize ZMQ broker: {e}")
@@ -410,6 +431,8 @@ class LKASLauncher:
                     sys.stdout = old_stdout
 
                 self.terminal.print(f"✓ Connected to image channel: {self.image_shm_name}")
+                self.shm_status[self.image_shm_name] = True
+                self._update_footer()
             except Exception:
                 pass  # Will retry on next call
 
@@ -424,6 +447,7 @@ class LKASLauncher:
                     retry_delay=0.0,
                 )
                 self.terminal.print(f"✓ Connected to detection channel: {self.detection_shm_name}")
+                # Note: detection_shm_name status is already set by subprocess output
             except Exception:
                 pass  # Will retry on next call
 
@@ -467,8 +491,8 @@ class LKASLauncher:
                         'frame_id': detection_msg.frame_id,
                     }
                     self.broker.broadcast_detection(detection_data, detection_msg.frame_id)
-                    # Log successful broadcast at configured interval
-                    if detection_msg.frame_id % self.broadcast_log_interval == 0:
+                    # Log successful broadcast at configured interval (only in verbose mode)
+                    if self.verbose and detection_msg.frame_id % self.broadcast_log_interval == 0:
                         self.terminal.print(f"[Broker] Detection: frame {detection_msg.frame_id}, L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None}")
             except Exception as e:
                 # Log errors to help diagnose issues
@@ -519,9 +543,6 @@ class LKASLauncher:
                 fcntl.fcntl(self.decision_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
             self.terminal.print(f"✓ Decision server started (PID: {self.decision_process.pid})")
 
-            self.detection_connected = True
-            self._update_footer()
-
             # Read decision initialization messages (buffered for ordering)
             # Buffer to capture the initial setup messages
             init_timeout = time.time() + self.decision_init_timeout
@@ -559,9 +580,6 @@ class LKASLauncher:
                 flags = fcntl.fcntl(self.detection_process.stdout, fcntl.F_GETFL)
                 fcntl.fcntl(self.detection_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
             self.terminal.print(f"✓ Detection server started (PID: {self.detection_process.pid})")
-
-            self.decision_connected = True
-            self._update_footer()
 
             # Read detection initialization messages (buffered for ordering)
             # Buffer to capture the initial setup messages

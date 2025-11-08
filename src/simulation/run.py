@@ -194,7 +194,7 @@ def main():
     print_banner(sim_config, system_config)
 
     # Create orchestrator
-    orchestrator = SimulationOrchestrator(sim_config, system_config)
+    orchestrator = SimulationOrchestrator(sim_config, system_config, verbose=args.verbose)
 
     # Setup all subsystems
     if not orchestrator.setup():

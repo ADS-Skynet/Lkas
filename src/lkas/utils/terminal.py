@@ -9,7 +9,6 @@ Provides clean, organized output similar to installation progress displays:
 import sys
 import threading
 import time
-from typing import Optional
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
@@ -40,9 +39,10 @@ class TerminalDisplay:
 
         # Rich console and live display
         self.console = Console()
-        self.live_display: Optional[Live] = None
-        self.detection_connected = False
-        self.decision_connected = False
+        self.live_display: Live | None = None
+
+        # Shared memory status tracking
+        self.shm_status = {}  # {name: connected_bool}
 
     def print(self, message: str, prefix: str = "", carriage_return: bool = False):
         """
@@ -79,47 +79,48 @@ class TerminalDisplay:
             self.live_display.start()
 
     def _generate_footer_table(self) -> Table:
-        """Generate footer table."""
+        """Generate footer table showing shared memory status."""
         table = Table.grid(padding=(0, 2))
         table.add_column(style="cyan", no_wrap=True)
         table.add_column(style="magenta", no_wrap=True)
+        table.add_column(style="yellow", no_wrap=True)
 
-        # Show connection status for detector and controller
-        detector_status = (
-            "[bold green]● CONNECTED[/bold green]" if self.detection_connected
-            else "[bold dim]○ DISCONNECTED[/bold dim]"
-        )
-        controller_status = (
-            "[bold green]● CONNECTED[/bold green]" if self.decision_connected
-            else "[bold dim]○ DISCONNECTED[/bold dim]"
-        )
+        # Build status displays for each shared memory
+        status_items = []
+        for shm_name, connected in sorted(self.shm_status.items()):
+            status = (
+                "[bold green]● CONNECTED[/bold green]" if connected
+                else "[bold dim]○ WAITING[/bold dim]"
+            )
+            status_items.append(f"[bold]{shm_name}:[/bold] {status}")
 
-        table.add_row(
-            f"[bold cyan]Detector:[/bold cyan] {detector_status}",
-            f"[bold magenta]Controller:[/bold magenta] {controller_status}"
-        )
+        # Add to table (up to 3 columns)
+        if len(status_items) == 0:
+            table.add_row("[dim]No shared memory configured[/dim]")
+        elif len(status_items) == 1:
+            table.add_row(status_items[0])
+        elif len(status_items) == 2:
+            table.add_row(status_items[0], status_items[1])
+        else:
+            table.add_row(status_items[0], status_items[1], status_items[2] if len(status_items) > 2 else "")
 
         return table
 
-    def update_footer(self, text: str = None, detection_connected: bool = None, decision_connected: bool = None):
+    def update_footer(self, shm_status: dict | None = None):
         """
-        Update the persistent footer line.
+        Update the persistent footer line with shared memory status.
 
         Args:
-            text: Legacy text (ignored, for backward compatibility)
-            detection_connected: Connection status of detection server
-            decision_connected: Connection status of decision server
+            shm_status: Dictionary mapping shared memory names to connection status
         """
 
         if not self.enable_footer:
             return
 
         with self.lock:
-            # Update connection status
-            if detection_connected is not None:
-                self.detection_connected = detection_connected
-            if decision_connected is not None:
-                self.decision_connected = decision_connected
+            # Update shared memory status
+            if shm_status is not None:
+                self.shm_status.update(shm_status)
 
             if self.live_display is not None:
                 self.live_display.update(self._generate_footer_table())
@@ -156,7 +157,7 @@ class OrderedLogger:
     processes appear in order instead of being interleaved.
     """
 
-    def __init__(self, prefix: str, terminal: Optional[TerminalDisplay] = None):
+    def __init__(self, prefix: str, terminal: TerminalDisplay | None = None):
         """
         Initialize ordered logger.
 

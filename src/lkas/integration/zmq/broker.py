@@ -51,7 +51,10 @@ class LKASBroker:
         broadcast_url: str = "tcp://*:5557",  # Broadcast to viewers
 
         # Optional shared ZMQ context
-        context: Optional[zmq.Context] = None,
+        context: zmq.Context | None = None,
+
+        # Verbose logging
+        verbose: bool = False,
     ):
         """
         Initialize LKAS broker.
@@ -132,6 +135,9 @@ class LKASBroker:
         self.action_count = 0
         self.vehicle_status_count = 0
 
+        # Verbose logging
+        self.verbose = verbose
+
         print("=" * 60)
         print("Broker ready to route and broadcast")
         print("=" * 60 + "\n")
@@ -180,7 +186,8 @@ class LKASBroker:
             self.param_forward_count += 1
 
             # Log parameter forwards for debugging
-            print(f"[Broker] Parameter forwarded: {category}.{parameter} = {value}")
+            if self.verbose:
+                print(f"[Broker] Parameter forwarded: {category}.{parameter} = {value}")
 
             return True
 
@@ -232,14 +239,17 @@ class LKASBroker:
             action = data['action']
             params = data.get('params', {})
 
-            print(f"[Broker] Action received: {action}")
+            if self.verbose:
+                print(f"[Broker] Action received: {action}")
 
             # Forward action to simulation (for pause/resume/respawn)
             self.action_pub_socket.send_multipart([
                 b'action',
                 json.dumps(data).encode('utf-8')
             ], flags=zmq.NOBLOCK)
-            print(f"[Broker] Action forwarded to simulation on port 5561: {action} - data: {data}")
+
+            if self.verbose:
+                print(f"[Broker] Action forwarded to vehicle: {action}")
 
             # Also route to registered local handlers (if any)
             if action in self.action_callbacks:
@@ -292,8 +302,8 @@ class LKASBroker:
 
             self.vehicle_status_count += 1
 
-            # Debug: Log pause state changes
-            if self.vehicle_status_count % 50 == 0:  # Every 50 messages
+            # Debug: Log pause state changes (disabled - use --verbose flag on lkas launcher)
+            if self.verbose and self.vehicle_status_count % 50 == 0:  # Every 50 messages
                 paused = data.get('paused', False)
                 steering = data.get('steering', 0.0)
                 speed_kmh = data.get('speed_kmh', 0.0)

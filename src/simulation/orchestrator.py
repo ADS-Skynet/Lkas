@@ -59,7 +59,7 @@ class SimulationOrchestrator:
     This class is testable by injecting dependencies.
     """
 
-    def __init__(self, config: SimulationConfig, system_config: object):
+    def __init__(self, config: SimulationConfig, system_config: object, verbose: bool = False):
         """
         Initialize orchestrator.
 
@@ -315,7 +315,7 @@ class SimulationOrchestrator:
 
                 # Get image from camera
                 image = self.camera.get_latest_image()
-                if image is None:
+                if image is None and self.config.verbose:
                     print("No image received yet, skipping frame...")
                     continue
 
@@ -361,7 +361,8 @@ class SimulationOrchestrator:
 
         if control is None:
             # No control received, use safe defaults
-            print("\n⚠️ Control timeout, applying safe defaults")
+            if self.config.verbose:
+                print("\n⚠️ Control timeout, applying safe defaults")
             self.timeouts += 1
             return ControlMessage(
                 steering=0.0,
