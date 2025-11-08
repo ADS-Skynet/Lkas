@@ -13,8 +13,8 @@ Architecture:
 """
 
 from typing import Optional
-from lkas.detection.integration.shared_memory_control import SharedMemoryControlChannel
-from lkas.detection.integration.messages import ControlMessage
+from lkas.integration.shared_memory import SharedMemoryControlChannel
+from lkas.integration.messages import ControlMessage
 
 
 class DecisionClient:

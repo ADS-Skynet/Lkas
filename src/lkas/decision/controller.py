@@ -5,7 +5,7 @@ Main controller that receives detection results and generates control commands.
 Combines lane analysis with PD control logic.
 """
 
-from lkas.detection.integration.messages import (
+from lkas.integration.messages import (
     DetectionMessage,
     ControlMessage,
     LaneMessage,

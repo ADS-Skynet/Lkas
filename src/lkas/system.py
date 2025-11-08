@@ -11,7 +11,7 @@ from typing import Optional
 import numpy as np
 from lkas.detection import DetectionClient
 from lkas.decision import DecisionClient
-from lkas.detection.integration.messages import DetectionMessage, ControlMessage
+from lkas.integration.messages import DetectionMessage, ControlMessage
 
 
 class LKAS:

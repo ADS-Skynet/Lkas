@@ -16,8 +16,8 @@ from typing import Optional
 
 from lkas.detection import LaneDetection
 from lkas.detection.core.config import Config
-from lkas.detection.integration.messages import ImageMessage, DetectionMessage
-from lkas.detection.integration.shared_memory_detection import (
+from lkas.integration.messages import ImageMessage, DetectionMessage
+from lkas.integration.shared_memory import (
     SharedMemoryImageChannel,
     SharedMemoryDetectionChannel
 )

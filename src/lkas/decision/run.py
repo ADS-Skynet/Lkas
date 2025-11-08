@@ -33,9 +33,8 @@ import time
 from pathlib import Path
 
 from lkas.detection.core.config import ConfigManager
-from lkas.detection.integration.messages import DetectionMessage, ControlMessage
-from lkas.detection.integration.shared_memory_detection import SharedMemoryDetectionChannel
-from lkas.detection.integration.shared_memory_control import SharedMemoryControlChannel
+from lkas.integration.messages import DetectionMessage, ControlMessage
+from lkas.integration.shared_memory import SharedMemoryDetectionChannel, SharedMemoryControlChannel
 from lkas.decision import DecisionController
 from simulation.constants import CommunicationConstants
 

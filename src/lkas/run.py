@@ -414,7 +414,7 @@ class LKASLauncher:
             try:
                 import sys
                 import io
-                from lkas.detection.integration.shared_memory_detection import SharedMemoryImageChannel
+                from lkas.integration.shared_memory import SharedMemoryImageChannel
 
                 # Suppress stdout during connection to avoid empty line from flush()
                 old_stdout = sys.stdout
@@ -439,7 +439,7 @@ class LKASLauncher:
         # Lazy connection to detection channel
         if self.detection_channel is None:
             try:
-                from lkas.detection.integration.shared_memory_detection import SharedMemoryDetectionChannel
+                from lkas.integration.shared_memory import SharedMemoryDetectionChannel
                 self.detection_channel = SharedMemoryDetectionChannel(
                     name=self.detection_shm_name,
                     create=False,  # Reader mode

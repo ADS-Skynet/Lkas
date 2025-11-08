@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from lkas.detection.core.config import ConfigManager
 from simulation import CARLAConnection, VehicleManager, CameraSensor
 from lkas import LKAS
-from lkas.detection.integration.messages import ControlMessage, ControlMode
+from lkas.integration.messages import ControlMessage, ControlMode
 from simulation.integration.zmq_broadcast import (
     VehicleStatusPublisher,
     ActionSubscriber,
@@ -241,10 +241,11 @@ class SimulationOrchestrator:
 
     def _handle_respawn(self) -> bool:
         """Handle respawn action."""
-        print("\n🔄 Respawn requested")
+        if self.config.verbose:
+            print(f"\n🔄 Respawn requested")
+
         try:
             if self.vehicle_mgr.teleport_to_spawn_point(self.config.spawn_point):
-                print("✓ Vehicle respawned successfully")
                 return True
             else:
                 print("✗ Failed to respawn vehicle")
@@ -257,14 +258,18 @@ class SimulationOrchestrator:
         """Handle pause action."""
         self.paused = True
         self._update_footer()
-        print("\n⏸ Paused - simulation loop will freeze")
+
+        if self.config.verbose:
+            print("\n⏸ Paused - simulation loop will freeze")
         return True
 
     def _handle_resume(self) -> bool:
         """Handle resume action."""
         self.paused = False
         self._update_footer()
-        print("\n▶️ Resumed - simulation loop continues")
+
+        if self.config.verbose:
+            print("\n▶️ Resumed - simulation loop continues")
         return True
 
     def run(self):

@@ -21,8 +21,8 @@ Or use components directly:
     )
 """
 
-# Re-export messages from lkas.detection.integration
-from lkas.detection.integration.messages import (
+# Re-export messages from lkas.integration
+from lkas.integration.messages import (
     ImageMessage,
     LaneMessage,
     DetectionMessage,

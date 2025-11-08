@@ -15,11 +15,11 @@ Architecture:
 
 from typing import Optional
 import numpy as np
-from lkas.detection.integration.shared_memory_detection import (
+from lkas.integration.shared_memory import (
     SharedMemoryDetectionChannel,
     SharedMemoryImageChannel
 )
-from lkas.detection.integration.messages import DetectionMessage
+from lkas.integration.messages import DetectionMessage
 
 
 class DetectionClient:
