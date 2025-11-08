@@ -29,7 +29,9 @@ from pathlib import Path
 from typing import Optional, List
 
 from lkas.utils.terminal import TerminalDisplay, OrderedLogger
-from lkas.detection.core.config import Config
+from lkas.detection.core.config import ConfigManager
+from lkas.constants import LauncherConstants
+import yaml
 
 
 class LKASLauncher:
@@ -45,6 +47,19 @@ class LKASLauncher:
         control_shm_name: str = "control_commands",
         verbose: bool = False,
         broadcast: bool = False,
+        # Process configuration
+        retry_count: int = None,
+        retry_delay: float = None,
+        decision_init_timeout: float = None,
+        detection_init_timeout: float = None,
+        process_stop_timeout: float = None,
+        # Terminal configuration
+        terminal_width: int = None,
+        log_file: str = None,
+        enable_footer: bool = None,
+        # Broadcasting configuration
+        jpeg_quality: int = None,
+        broadcast_log_interval: int = None,
     ):
         """
         Initialize LKAS launcher.
@@ -58,7 +73,18 @@ class LKASLauncher:
             control_shm_name: Shared memory name for control commands
             verbose: Enable verbose output (FPS stats, latency info)
             broadcast: Enable ZMQ broadcasting for remote viewers
+            retry_count: Number of retries (overrides config)
+            retry_delay: Delay between retries (overrides config)
+            decision_init_timeout: Decision server init timeout (overrides config)
+            detection_init_timeout: Detection server init timeout (overrides config)
+            process_stop_timeout: Process stop timeout (overrides config)
+            terminal_width: Terminal width (overrides config)
+            log_file: Log file path (overrides config)
+            enable_footer: Enable footer (overrides config)
+            jpeg_quality: JPEG quality (overrides config)
+            broadcast_log_interval: Broadcast log interval (overrides config)
         """
+        # Core configuration
         self.method = method
         self.config = config
         self.gpu = gpu
@@ -68,6 +94,68 @@ class LKASLauncher:
         self.verbose = verbose
         self.broadcast = broadcast
 
+        # Load config for shared memory setup
+        self.system_config = ConfigManager.load(self.config)
+
+        # Load launcher config from yaml (if config path provided)
+        launcher_config = {}
+        if self.config:
+            try:
+                config_path = Path(self.config)
+                if config_path.exists():
+                    with open(config_path, 'r') as f:
+                        yaml_data = yaml.safe_load(f)
+                        launcher_config = yaml_data.get('launcher', {}) if yaml_data else {}
+            except Exception:
+                pass  # Use empty dict if loading fails
+
+        # Process configuration: parameters > config.yaml > constants
+        self.retry_count = (
+            retry_count if retry_count is not None
+            else launcher_config.get('retry_count', LauncherConstants.DEFAULT_RETRY_COUNT)
+        )
+        self.retry_delay = (
+            retry_delay if retry_delay is not None
+            else launcher_config.get('retry_delay', LauncherConstants.DEFAULT_RETRY_DELAY)
+        )
+        self.decision_init_timeout = (
+            decision_init_timeout if decision_init_timeout is not None
+            else launcher_config.get('decision_init_timeout', LauncherConstants.DEFAULT_DECISION_INIT_TIMEOUT)
+        )
+        self.detection_init_timeout = (
+            detection_init_timeout if detection_init_timeout is not None
+            else launcher_config.get('detection_init_timeout', LauncherConstants.DEFAULT_DETECTION_INIT_TIMEOUT)
+        )
+        self.process_stop_timeout = (
+            process_stop_timeout if process_stop_timeout is not None
+            else launcher_config.get('process_stop_timeout', LauncherConstants.DEFAULT_PROCESS_STOP_TIMEOUT)
+        )
+
+        # Terminal configuration
+        self.terminal_width = (
+            terminal_width if terminal_width is not None
+            else launcher_config.get('terminal_width', LauncherConstants.DEFAULT_TERMINAL_WIDTH)
+        )
+        self.log_file_path = (
+            log_file if log_file is not None
+            else launcher_config.get('log_file', LauncherConstants.DEFAULT_LOG_FILE)
+        )
+        self.enable_footer = (
+            enable_footer if enable_footer is not None
+            else launcher_config.get('enable_footer', True)
+        )
+
+        # Broadcasting configuration
+        self.jpeg_quality = (
+            jpeg_quality if jpeg_quality is not None
+            else launcher_config.get('jpeg_quality', LauncherConstants.DEFAULT_JPEG_QUALITY)
+        )
+        self.broadcast_log_interval = (
+            broadcast_log_interval if broadcast_log_interval is not None
+            else launcher_config.get('broadcast_log_interval', LauncherConstants.DEFAULT_BROADCAST_LOG_INTERVAL)
+        )
+
+        # Process handles
         self.detection_process: Optional[subprocess.Popen] = None
         self.decision_process: Optional[subprocess.Popen] = None
         self.running = False
@@ -77,15 +165,11 @@ class LKASLauncher:
         self.image_channel = None
         self.detection_channel = None
 
-        # Load config for shared memory setup
-        self.system_config = Config.from_file(self.config) if self.config else Config()
-
-
         # Terminal display with persistent footer
-        self.enable_footer = True
+        subprocess_prefix = LauncherConstants.DEFAULT_SUBPROCESS_PREFIX
         self.terminal = TerminalDisplay(enable_footer=self.enable_footer)
-        self.detection_logger = OrderedLogger("[SubProc]", self.terminal)
-        self.decision_logger = OrderedLogger("[SubProc]", self.terminal)
+        self.detection_logger = OrderedLogger(subprocess_prefix, self.terminal)
+        self.decision_logger = OrderedLogger(subprocess_prefix, self.terminal)
 
         # Connection tracking
         self.detection_connected = False
@@ -112,9 +196,9 @@ class LKASLauncher:
             "--detection-shm-name",
             self.detection_shm_name,
             "--retry-count",
-            "60",  # Wait up to 30 seconds for simulation
+            str(self.retry_count),
             "--retry-delay",
-            "0.5",
+            str(self.retry_delay),
         ]
 
         if self.config:
@@ -139,9 +223,9 @@ class LKASLauncher:
             "--control-shm-name",
             self.control_shm_name,
             "--retry-count",
-            "60",  # Wait up to 30 seconds for detection server
+            str(self.retry_count),
             "--retry-delay",
-            "0.5",
+            str(self.retry_delay),
         ]
 
         if self.config:
@@ -154,9 +238,12 @@ class LKASLauncher:
 
     def _print_header(self):
         """Print startup header."""
-        self.terminal.print("\n" + "=" * 70)
-        self.terminal.print(" " * 20 + "LKAS System Launcher")
-        self.terminal.print("=" * 70)
+        separator = "=" * self.terminal_width
+        title_padding = " " * ((self.terminal_width - len("LKAS System Launcher")) // 2)
+
+        self.terminal.print("\n" + separator)
+        self.terminal.print(title_padding + "LKAS System Launcher")
+        self.terminal.print(separator)
         self.terminal.print(f"  Detection Method: {self.method.upper()}")
         if self.gpu is not None:
             self.terminal.print(f"  GPU Device: {self.gpu}")
@@ -167,7 +254,7 @@ class LKASLauncher:
         self.terminal.print(f"  Control SHM: {self.control_shm_name}")
         if self.broadcast:
             self.terminal.print(f"  ZMQ Broadcast: Enabled")
-        self.terminal.print("=" * 70)
+        self.terminal.print(separator)
         self.terminal.print("")
 
     def _read_process_output(self, process: subprocess.Popen, prefix: str, logger: OrderedLogger):
@@ -192,7 +279,7 @@ class LKASLauncher:
             try:
                 # Read available data (non-blocking)
                 # Stats lines end with \r, regular lines end with \n
-                data = process.stdout.read(4096)  # Read up to 4KB
+                data = process.stdout.read(LauncherConstants.DEFAULT_BUFFER_READ_SIZE)
                 if data:
                     lines_raw = data.decode('utf-8')
                     lines = lines_raw.splitlines(keepends=True)
@@ -226,7 +313,7 @@ class LKASLauncher:
             # Fallback for Windows
             try:
                 # Try to read available data
-                data = process.stdout.read(4096)
+                data = process.stdout.read(LauncherConstants.DEFAULT_BUFFER_READ_SIZE)
                 if data:
                     lines_raw = data.decode('utf-8')
                     lines = lines_raw.splitlines(keepends=True)
@@ -337,7 +424,7 @@ class LKASLauncher:
                     self.broker.broadcast_frame(
                         image_msg.image,
                         image_msg.frame_id,
-                        jpeg_quality=85
+                        jpeg_quality=self.jpeg_quality
                     )
             except Exception:
                 pass  # Silently ignore read errors
@@ -369,8 +456,8 @@ class LKASLauncher:
                         'frame_id': detection_msg.frame_id,
                     }
                     self.broker.broadcast_detection(detection_data, detection_msg.frame_id)
-                    # Log successful broadcast every 100 frames
-                    if detection_msg.frame_id % 100 == 0:
+                    # Log successful broadcast at configured interval
+                    if detection_msg.frame_id % self.broadcast_log_interval == 0:
                         self.terminal.print(f"[green]✓ Broadcasting detection: frame {detection_msg.frame_id}, L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None}[/green]")
             except Exception as e:
                 # Log errors to help diagnose issues
@@ -381,7 +468,7 @@ class LKASLauncher:
         self._print_header()
 
         # Open log file
-        self.log_file = open("lkas_run.log", "w", buffering=1)
+        self.log_file = open(self.log_file_path, "w", buffering=1)
 
         # Setup ZMQ broker if enabled
         self._setup_broker()
@@ -425,8 +512,8 @@ class LKASLauncher:
             self._update_footer()
 
             # Read decision initialization messages (buffered for ordering)
-            # Buffer for 3 seconds to capture the initial setup messages
-            init_timeout = time.time() + 3.0
+            # Buffer to capture the initial setup messages
+            init_timeout = time.time() + self.decision_init_timeout
             while time.time() < init_timeout:
                 self._read_process_output(self.decision_process, "DECISION ", self.decision_logger)
                 time.sleep(0.01)
@@ -441,7 +528,7 @@ class LKASLauncher:
                 return 1
 
             # Small delay before starting detection server
-            time.sleep(0.5)
+            time.sleep(LauncherConstants.DEFAULT_POST_DECISION_DELAY)
 
             # Start detection server AFTER decision is ready
             self.terminal.print("\nStarting detection server...")
@@ -466,8 +553,8 @@ class LKASLauncher:
             self._update_footer()
 
             # Read detection initialization messages (buffered for ordering)
-            # Buffer for 4 seconds to capture the initial setup messages
-            init_timeout = time.time() + 4.0
+            # Buffer to capture the initial setup messages
+            init_timeout = time.time() + self.detection_init_timeout
             while time.time() < init_timeout:
                 self._read_process_output(self.detection_process, "DETECTION", self.detection_logger)
                 time.sleep(0.01)
@@ -486,15 +573,17 @@ class LKASLauncher:
             # Setup shared memory readers for broadcasting (after servers are ready)
             self._setup_shared_memory_readers()
 
-            self.terminal.print("\n" + "=" * 70)
+            separator = "=" * self.terminal_width
+            wait_time = int(self.retry_count * self.retry_delay)
+            self.terminal.print("\n" + separator)
             self.terminal.print("System running - Press Ctrl+C to stop")
             self.terminal.print("")
-            self.terminal.print("Servers will wait up to 30 seconds for connections:")
+            self.terminal.print(f"Servers will wait up to {wait_time} seconds for connections:")
             self.terminal.print("  - Detection server waiting for camera_feed from simulation")
             self.terminal.print("  - Decision server waiting for detection_results from detection")
             self.terminal.print("")
             self.terminal.print("Ready! Start 'simulation' in another terminal to begin processing")
-            self.terminal.print("=" * 70 + "\n")
+            self.terminal.print(separator + "\n")
 
             # Initialize footer
             self._update_footer()
@@ -540,7 +629,7 @@ class LKASLauncher:
                     break
 
                 # Small sleep to prevent busy-waiting
-                time.sleep(0.01)
+                time.sleep(LauncherConstants.DEFAULT_MAIN_LOOP_SLEEP)
 
         except Exception as e:
             self.terminal.clear_footer()
@@ -582,7 +671,7 @@ class LKASLauncher:
             self.terminal.print("Stopping decision server...")
             self.decision_process.terminate()
             try:
-                self.decision_process.wait(timeout=5.0)
+                self.decision_process.wait(timeout=self.process_stop_timeout)
                 self.terminal.print("✓ Decision server stopped")
             except subprocess.TimeoutExpired:
                 self.terminal.print("! Decision server not responding, killing...")
@@ -594,7 +683,7 @@ class LKASLauncher:
             self.terminal.print("Stopping detection server...")
             self.detection_process.terminate()
             try:
-                self.detection_process.wait(timeout=5.0)
+                self.detection_process.wait(timeout=self.process_stop_timeout)
                 self.terminal.print("✓ Detection server stopped")
             except subprocess.TimeoutExpired:
                 self.terminal.print("! Detection server not responding, killing...")

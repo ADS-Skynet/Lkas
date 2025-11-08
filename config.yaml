@@ -109,3 +109,25 @@ system:
   target_fps: 30
   enable_logging: true
   log_file: "lkas.log"
+
+# LKAS Launcher
+launcher:
+  # Process retry configuration
+  retry_count: 60           # Number of retries for server connections
+  retry_delay: 0.5          # Delay between retries in seconds
+
+  # Process initialization timeouts
+  decision_init_timeout: 3.0    # Decision server initialization timeout (seconds)
+  detection_init_timeout: 4.0   # Detection server initialization timeout (seconds)
+  process_stop_timeout: 5.0     # Graceful process termination timeout (seconds)
+
+  # Terminal display
+  terminal_width: 70        # Width of terminal output
+  enable_footer: true       # Enable persistent footer display
+
+  # Logging
+  log_file: "lkas_run.log"  # Path to launcher log file
+
+  # Broadcasting (ZMQ)
+  jpeg_quality: 85          # JPEG quality for frame broadcasting (0-100)
+  broadcast_log_interval: 100  # Log broadcast status every N frames

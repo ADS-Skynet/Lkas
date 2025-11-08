@@ -97,6 +97,35 @@ class ControlModes:
     EMERGENCY_STOP = "emergency_stop"
 
 
+class LauncherConstants:
+    """Constants for LKAS launcher process management."""
+
+    # Retry configuration
+    DEFAULT_RETRY_COUNT = 60
+    DEFAULT_RETRY_DELAY = 0.5  # seconds
+
+    # Process initialization timeouts
+    DEFAULT_DECISION_INIT_TIMEOUT = 3.0  # seconds
+    DEFAULT_DETECTION_INIT_TIMEOUT = 4.0  # seconds
+    DEFAULT_PROCESS_STOP_TIMEOUT = 5.0  # seconds
+
+    # Terminal display
+    DEFAULT_TERMINAL_WIDTH = 70
+    DEFAULT_SUBPROCESS_PREFIX = "[SubProc]"
+
+    # File I/O
+    DEFAULT_LOG_FILE = "lkas_run.log"
+    DEFAULT_BUFFER_READ_SIZE = 4096  # bytes
+
+    # Broadcasting
+    DEFAULT_JPEG_QUALITY = 85  # 0-100
+    DEFAULT_BROADCAST_LOG_INTERVAL = 100  # frames
+
+    # Main loop timing
+    DEFAULT_MAIN_LOOP_SLEEP = 0.01  # seconds
+    DEFAULT_POST_DECISION_DELAY = 0.5  # seconds
+
+
 # Convenience exports
 __all__ = [
     'CVDetectionConstants',
@@ -104,4 +133,5 @@ __all__ = [
     'VisualizationConstants',
     'DetectorTypes',
     'ControlModes',
+    'LauncherConstants',
 ]
