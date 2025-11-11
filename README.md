@@ -1,569 +1,555 @@
-# Autonomous Driving Lane Keeping System
+# Autonomous Driving Skynet - Lane Keeping System
 
-A modular, production-ready lane keeping system for CARLA simulator with clean separation of concerns.
+**Real-time lane keeping assist system with WebSocket-powered monitoring and live parameter tuning for CARLA simulator.**
 
 ## 🌟 Features
 
-- **Clean 3-Module Architecture**: Simulation, Detection, Decision
-- **Dual Detection Methods**: Computer Vision (OpenCV) and Deep Learning (PyTorch CNN)
-- **Distributed System**: Run detection as separate process
-- **Multiple Visualization Options**: OpenCV, Pygame, and Web viewer (no X11 needed!)
-- **Production Ready**: Process isolation, shared memory communication, fault tolerance
-- **Modern Python Package**: `pyproject.toml`, editable install, entry point scripts
+- **🚀 WebSocket Real-Time Streaming** - Binary frame transmission with 50-300ms latency
+- **🎮 Live Parameter Tuning** - Adjust detection and PID parameters on-the-fly
+- **📡 ZMQ Broker Architecture** - Distributed communication between modules
+- **🔄 Multiple Detection Methods** - OpenCV (CV), YOLO, YOLO-Seg
+- **🎯 PID Controller** - Smooth steering with configurable gains
+- **🌐 Remote Web Viewer** - Monitor from any browser, no X11 required
+- **⚡ Low Latency** - Optimized performance with frame rate limiting
+- **🔧 Production Ready** - Process isolation, fault tolerance, comprehensive logging
 
 ## 📦 Installation
 
 ### Prerequisites
 - Python 3.10+
 - CARLA 0.9.15+ simulator
-- GPU (optional, for deep learning detection)
+- GPU (optional, for YOLO detection)
 
-### Install Package
+### Quick Install
 
 ```bash
 # Clone repository
 git clone <repository-url>
-cd seame-ads
+cd ads_skynet
 
-# Install in editable mode with all dependencies
+# Install package with all dependencies
 pip install -e .
 
-# Or install with optional development tools
-pip install -e ".[dev]"
-
-# Or install everything (dev + training tools)
-pip install -e ".[all]"
+# Verify installation
+lkas --help
+simulation --help
+viewer --help
 ```
 
-This installs the package as `ads-skynet` with four command-line entry points:
-- `simulation` - Main CARLA simulation
-- `lane-detection` - Standalone detection server
-- `decision-server` - Decision/control server
-- `viewer` - Remote web viewer
+This installs the `ads-skynet` package with three main entry points:
+- `lkas` - Lane Keeping Assist System (detection + decision + broker)
+- `simulation` - CARLA simulation orchestrator
+- `viewer` - WebSocket-powered web viewer
 
 ## 🚀 Quick Start
 
-### Integrated Mode (All-in-one)
+### Full System Setup
 
 ```bash
-# Terminal 1: Start CARLA server
+# Terminal 1: Start CARLA simulator
+cd ~/carla
 ./CarlaUE4.sh
 
-# Terminal 2: Start LKAS (detection + decision integrated)
-lkas --method cv --viewer web
+# Terminal 2: Start LKAS (detection + decision + ZMQ broker)
+cd ~/ads_skynet
+lkas --method cv --broadcast
 
-# Open browser: http://localhost:8080 (port configured in config.yaml)
+# Terminal 3: Start simulation (connects to LKAS via ZMQ)
+simulation --broadcast
+
+# Terminal 4: Start web viewer (optional, for monitoring)
+viewer
+
+# Open browser: http://localhost:8080
 ```
 
-### Modular Mode (Separate Processes)
+### What You'll See
 
-**Better for distributed systems and resource allocation:**
+**Web Viewer Dashboard:**
+- 🎥 Live video stream with lane overlays
+- 📊 Real-time FPS and latency metrics
+- 🎛️ Interactive parameter sliders
+- 🔘 Control buttons (Pause/Resume/Respawn)
+- 🟢 Connection status indicator
 
-```bash
-# Terminal 1: Start CARLA server
-./CarlaUE4.sh
+## 🏗️ Architecture
 
-# Terminal 2: Start detection server
-lane-detection --method cv
+### System Overview
 
-# Terminal 3: Start decision server
-decision-server
-
-# Terminal 4: Start simulation orchestrator
-simulation --viewer web
-
-# Open browser: http://localhost:8080 (port configured in config.yaml)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    CARLA Simulator                          │
+│                     (UE4 Engine)                            │
+└──────────────┬──────────────────────────┬───────────────────┘
+               │                          │
+         Camera Frames             Vehicle Control
+               │                          │
+┌──────────────┴──────────────────────────┴───────────────────┐
+│              Simulation Orchestrator                        │
+│  • Spawns vehicle & camera                                  │
+│  • Sends frames to LKAS (ZMQ port 5560)                     │
+│  • Receives steering from LKAS (ZMQ port 5563)              │
+│  • Publishes status to LKAS Broker (ZMQ port 5562)         │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+              ZMQ Communication (ports 5560-5563)
+                          │
+┌─────────────────────────┴───────────────────────────────────┐
+│                   LKAS Module (ZMQ Broker)                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   │
+│  │  Detection   │→  │   Decision   │→  │   Actuator   │   │
+│  │   (Vision)   │   │    (PID)     │   │  (Steering)  │   │
+│  └──────────────┘   └──────────────┘   └──────────────┘   │
+│         │                                       │           │
+│         └───────────────┬───────────────────────┘           │
+│                         │                                   │
+│                   ZMQ Broker Hub                            │
+│              (Coordinates all modules)                      │
+│                                                             │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+          ZMQ Broadcasting (ports 5557-5559)
+                          │
+        ┌─────────────────┼─────────────────┐
+        │                 │                 │
+    Frames           Actions          Parameters
+  (port 5557)     (port 5558)      (port 5559)
+        │                 │                 │
+┌───────┴─────────────────┴─────────────────┴─────────────────┐
+│                   Viewer Process                            │
+│  • Receives data via ZMQ                                    │
+│  • Renders overlays on laptop                               │
+│  • Serves WebSocket (binary frames, ~50-100ms latency)     │
+│  • HTTP server (port 8080) + WebSocket (port 8081)         │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                    WebSocket
+                  (Binary JPEG Frames)
+                          │
+              ┌───────────┴───────────┐
+              │   Web Browser         │
+              │  (localhost:8080)     │
+              │  • Live video         │
+              │  • Parameter tuning   │
+              │  • Control buttons    │
+              └───────────────────────┘
 ```
 
-**Benefits:**
-- ✅ Separate processes for detection and decision
-- ✅ Shared memory for low-latency communication
-- ✅ Independent lifecycle management
-- ✅ Easy to distribute across machines
+### Data Flow
 
-**Alternative (using Python modules directly):**
-```bash
-# Terminal 2
-python -m lkas.detection.run --method cv
-
-# Terminal 3
-python -m lkas.decision.run
-
-# Terminal 4
-python -m simulation.run --viewer web
-```
+1. **CARLA** → Camera frames → **Simulation**
+2. **Simulation** → Frames via ZMQ → **LKAS Detection**
+3. **LKAS Detection** → Lane data → **LKAS Decision**
+4. **LKAS Decision** → Steering commands → **Simulation**
+5. **Simulation** → Vehicle control → **CARLA**
+6. **LKAS Broker** → Broadcasts all data → **Viewer**
+7. **Viewer** → WebSocket binary frames → **Browser**
+8. **Browser** → Actions/Parameters → **Viewer** → **LKAS Broker**
 
 ## 📁 Project Structure
 
 ```
 ads_skynet/
-├── pyproject.toml           # 📦 Package configuration & dependencies
-├── config.yaml              # ⚙️ System configuration (auto-loaded from project root)
+├── pyproject.toml              # Package configuration & dependencies
+├── config.yaml                 # System configuration (auto-loaded)
+├── README.md                   # This file
 │
 ├── src/
+│   ├── lkas/                   # Lane Keeping Assist System
+│   │   ├── run.py              # Main LKAS entry point
+│   │   ├── orchestrator.py     # LKAS pipeline coordinator
+│   │   │
+│   │   ├── detection/          # Lane detection (CV, YOLO)
+│   │   │   ├── core/
+│   │   │   │   ├── detector.py       # Detection interface
+│   │   │   │   ├── config.py         # Configuration management
+│   │   │   │   └── models.py         # Lane data models
+│   │   │   ├── cv/                   # OpenCV detector
+│   │   │   ├── yolo/                 # YOLO detector
+│   │   │   └── preprocessing/        # ROI masking, etc.
+│   │   │
+│   │   ├── decision/           # Steering control
+│   │   │   ├── controller.py   # PID controller
+│   │   │   └── metrics.py      # Control metrics
+│   │   │
+│   │   └── integration/        # Communication
+│   │       └── zmq/            # ZMQ broker & messaging
+│   │           ├── broker.py         # Main ZMQ broker
+│   │           ├── broadcaster.py    # Data broadcasting
+│   │           └── messages.py       # Message protocols
 │   │
-│   ├── lkas/                ⭐ Lane Keeping Assist System
-│   │   ├── run.py           # Integrated LKAS entry point
-│   │   ├── system.py        # LKAS orchestrator
+│   ├── simulation/             # CARLA Simulation
+│   │   ├── run.py              # Simulation entry point
+│   │   ├── orchestrator.py     # System coordinator
 │   │   │
-│   │   ├── detection/       # Lane detection module
-│   │   │   ├── run.py       # Detection server entry point
-│   │   │   ├── server.py    # DetectionServer with shared memory
-│   │   │   ├── client.py    # DetectionClient for IPC
-│   │   │   ├── detector.py  # Core LaneDetection wrapper
-│   │   │   │
-│   │   │   ├── core/        # Core abstractions
-│   │   │   │   ├── config.py     # Configuration management
-│   │   │   │   ├── factory.py    # Factory pattern
-│   │   │   │   ├── interfaces.py # Abstract base classes
-│   │   │   │   └── models.py     # Data models (Lane, DetectionResult)
-│   │   │   │
-│   │   │   ├── integration/ # IPC infrastructure
-│   │   │   │   ├── messages.py              # Message definitions
-│   │   │   │   ├── shared_memory_detection.py  # Image/detection channels
-│   │   │   │   └── shared_memory_control.py    # Control channel
-│   │   │   │
-│   │   │   └── method/      # Detection implementations
-│   │   │       ├── computer_vision/  # OpenCV-based
-│   │   │       │   └── cv_lane_detector.py
-│   │   │       └── deep_learning/    # CNN-based
-│   │   │           ├── lane_net.py
-│   │   │           └── lane_net_base.py
+│   │   ├── carla_api/          # CARLA interface
+│   │   │   ├── connection.py   # CARLA connection
+│   │   │   ├── vehicle.py      # Vehicle control
+│   │   │   └── camera.py       # Camera sensors
 │   │   │
-│   │   └── decision/        # Control decision module
-│   │       ├── run.py       # Decision server entry point
-│   │       ├── server.py    # DecisionServer
-│   │       ├── client.py    # DecisionClient
-│   │       ├── analyzer.py  # Lane position analysis
-│   │       └── controller.py # PD control logic
+│   │   ├── integration/        # LKAS integration
+│   │   │   └── zmq_broadcast.py      # ZMQ publishers/subscribers
+│   │   │
+│   │   └── utils/              # Utilities
+│   │       └── visualizer.py   # Overlay rendering
 │   │
-│   ├── simulation/          ⭐ CARLA simulation & orchestration
-│   │   ├── run.py           # Main simulation entry point
-│   │   ├── orchestrator.py  # System orchestrator
-│   │   │
-│   │   ├── carla_api/       # CARLA interface
-│   │   │   ├── connection.py # CARLA connection
-│   │   │   ├── vehicle.py    # Vehicle control
-│   │   │   └── sensors.py    # Camera sensors
-│   │   │
-│   │   ├── integration/     # LKAS integration
-│   │   │   └── __init__.py  # Detection/Decision clients
-│   │   │
-│   │   ├── processing/      # Frame processing
-│   │   │   ├── frame_processor.py  # Processing pipeline
-│   │   │   └── metrics_logger.py   # Performance metrics
-│   │   │
-│   │   └── utils/           # Utilities
-│   │       └── visualizer.py # Visualization helpers
-│   │
-│   └── viewer/              ⭐ Remote web viewer
-│       ├── run.py           # Web viewer entry point
-│       ├── __init__.py      # Package exports
-│       └── README.md        # Viewer documentation
+│   └── viewer/                 # WebSocket Web Viewer
+│       ├── run.py              # Viewer entry point
+│       ├── frontend.html       # Web interface (HTML/CSS/JS)
+│       ├── test_websocket.py   # WebSocket testing tool
+│       └── README.md           # Viewer documentation
 │
-└── docs/                    # Documentation
-    └── README.md            # Documentation index
+└── docs/                       # Additional documentation
 ```
 
-## 🎯 Architecture
+## 🎯 Module Responsibilities
 
-### Clean 3-Module Separation
+### LKAS Module (`src/lkas/`)
+- **Detection:** Processes camera frames, detects lane markings
+- **Decision:** Analyzes lanes, computes steering via PID controller
+- **ZMQ Broker:** Coordinates all communication between modules
+- **Broadcasting:** Publishes data to viewer for monitoring
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    simulation/                               │
-│              (CARLA Orchestration Layer)                     │
-│  • Runs CARLA simulation                                     │
-│  • Coordinates LKAS modules via shared memory                │
-│  • Provides visualization                                    │
-└──────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌────────────────┐  ┌───────────────────┐  ┌──────────────────┐
-│  lkas/         │  │   lkas/           │  │    simulation/   │
-│  detection/    │  │   decision/       │  │    carla_api/    │
-│                │  │                   │  │                  │
-│ • CV Detection │  │ • Lane Analysis   │  │ • Connection     │
-│ • DL Detection │  │ • PD Controller   │  │ • Vehicle        │
-│ • Shared Mem   │  │ • Steering Calc   │  │ • Sensors        │
-└────────────────┘  └───────────────────┘  └──────────────────┘
-```
+**Entry point:** `lkas --method cv --broadcast`
 
-### Module Responsibilities
+### Simulation Module (`src/simulation/`)
+- **CARLA Integration:** Connects to simulator, spawns vehicle
+- **Camera Management:** Sets up sensors, captures frames
+- **ZMQ Communication:** Sends frames to LKAS, receives steering
+- **Status Publishing:** Broadcasts vehicle telemetry
 
-**`simulation/`** - CARLA Integration & Orchestration
-- Connects to CARLA simulator
-- Manages vehicles and sensors
-- Orchestrates LKAS modules via shared memory
-- **Contains:** CARLA API wrappers, orchestrator, visualization
+**Entry point:** `simulation --broadcast`
 
-**`lkas/detection/`** - Pure Lane Detection
-- Detects lanes from images (CV or DL)
-- Runs as separate process with shared memory IPC
-- No CARLA dependencies
-- **Contains:** detection algorithms, server/client, shared memory channels
+### Viewer Module (`src/viewer/`)
+- **ZMQ Subscription:** Receives data from LKAS broker
+- **Rendering:** Draws lane overlays and HUD on laptop
+- **WebSocket Server:** Streams binary frames to browser
+- **Web Interface:** Provides monitoring and control dashboard
 
-**`lkas/decision/`** - Control Decisions
-- Analyzes lane position from detection results
-- Generates steering commands via PD controller
-- Runs as separate process with shared memory IPC
-- **Contains:** analyzer, controller, server/client
+**Entry point:** `viewer`
 
-## 🎮 Usage
+## ⚙️ Configuration
 
-### Basic Usage (Local)
+### config.yaml
 
-```bash
-# Integrated mode (easiest)
-lkas --method cv --viewer web
-
-# Or modular mode (separate processes)
-# Terminal 1: Detection server
-lane-detection --method cv
-
-# Terminal 2: Decision server
-decision-server
-
-# Terminal 3: Simulation
-simulation --viewer web
-```
-
-### Remote CARLA Server
-
-```bash
-# Simulation connects to remote CARLA
-simulation \
-  --host <CARLA_HOST> \
-  --port 2000 \
-  --viewer web
-```
-
-### Deep Learning Detection
-
-```bash
-# Integrated mode with DL
-lkas --method dl --viewer web
-
-# Or modular mode with DL
-lane-detection --method dl
-decision-server
-simulation --viewer web
-```
-
-### Viewer Options
-
-```bash
-# Web viewer (works in Docker, no X11 needed)
-lkas --viewer web
-
-# Override web port (default from config.yaml: 8080)
-lkas --viewer web --web-port 8081
-
-# OpenCV window (requires X11)
-lkas --viewer opencv
-
-# Pygame window
-lkas --viewer pygame
-
-# No visualization (headless)
-lkas --no-display
-```
-
-## 🔧 Configuration
-
-The system automatically loads `config.yaml` from the project root. You can also specify a custom config:
-
-```bash
-# Use project root config.yaml (default)
-simulation
-
-# Use custom config
-simulation --config /path/to/custom-config.yaml
-
-# Use built-in defaults (no file)
-simulation --config default
-```
-
-### Configuration File Structure
-
-Edit `config.yaml` in the project root:
+The system loads `config.yaml` from the project root:
 
 ```yaml
 # CARLA Connection
 carla:
-  host: "localhost"
+  host: localhost
   port: 2000
-  vehicle_type: "vehicle.tesla.model3"
+  timeout: 10.0
 
-# Camera Settings
-camera:
-  width: 800
-  height: 600
-  fov: 90.0
-  position:
-    x: 2.0
-    y: 0.0
-    z: 1.5
-  rotation:
-    pitch: -10.0
-    yaw: 0.0
-    roll: 0.0
+  vehicle:
+    model: vehicle.tesla.model3
+    spawn_point: 0  # or null for random
 
-# Lane Analysis & Control
-lane_analyzer:
-  kp: 0.5              # Proportional gain
-  kd: 0.1              # Derivative gain
-  drift_threshold: 0.15
-  departure_threshold: 0.35
+  camera:
+    width: 640
+    height: 480
+    fov: 110
 
-# Adaptive Throttle Policy
-throttle_policy:
-  base: 0.15           # Base throttle
-  min: 0.05            # Minimum during turns
+# Detection Parameters
+detection:
+  method: cv  # cv, yolo, yolo-seg
+  cv:
+    canny_low: 50
+    canny_high: 150
+    hough_threshold: 50
+    hough_min_line_len: 40
+    smoothing_factor: 0.7
+
+# PID Control Parameters
+decision:
+  kp: 0.5             # Proportional gain
+  kd: 0.1             # Derivative gain
+  throttle_base: 0.14
+  throttle_min: 0.05
   steer_threshold: 0.15
-  steer_max: 0.70
+
+# ZMQ Ports
+zmq:
+  # LKAS Broker ports
+  broker:
+    detection_input_port: 5560    # Receive frames from sim
+    decision_output_port: 5563    # Send steering to sim
+    viewer_data_port: 5557        # Broadcast to viewer
+    viewer_action_port: 5558      # Receive actions from viewer
+    parameter_update_port: 5559   # Receive parameters from viewer
+
+  # Simulation ports
+  simulation:
+    detection_output_port: 5560   # Send frames to LKAS
+    decision_input_port: 5563     # Receive steering from LKAS
+    status_publish_port: 5562     # Publish status to broker
+
+# Viewer Configuration
+visualization:
+  web_port: 8080  # HTTP server (WebSocket will be port+1)
 ```
 
-See [config.yaml](config.yaml) for full configuration options.
-
-## 🧪 Testing
-
-### Verify Installation
+### Custom Configuration
 
 ```bash
-# Check if entry points are installed
-which simulation
-which lane-detection
+# Use project root config.yaml (default)
+lkas --method cv --broadcast
 
-# Test import
-python -c "import detection; import simulation; import decision; print('✓ All modules imported')"
+# Use custom config
+lkas --config /path/to/custom-config.yaml --method cv --broadcast
+
+# Override specific settings
+simulation --broadcast --spawn-id 123
+viewer --port 9090
 ```
 
-### Test Detection Server
+## 🎮 Web Interface Features
 
-```bash
-# Terminal 1: Start server
-lane-detection --method cv --port 5556
+### Live Video Stream
+- Real-time lane detection overlays
+- Vehicle telemetry HUD (speed, steering, position)
+- FPS and latency monitoring
+- Connection status indicator
 
-# Terminal 2: Test connection
-python -c "from simulation.integration.communication import DetectionClient; print('✓ Detection server works')"
-```
+### Interactive Controls
+- **🔄 Respawn Vehicle** - Reset to spawn point
+- **⏸ Pause / ▶ Resume** - Control simulation
+- **Keyboard:** `R` for respawn, `Space` for pause/resume
 
-### Run Tests (if dev dependencies installed)
+### Live Parameter Tuning
 
-```bash
-# Install with dev tools
-pip install -e ".[dev]"
+**Detection Parameters (adjustable in real-time):**
+- Canny Low Threshold (1-150)
+- Canny High Threshold (50-255)
+- Hough Threshold (1-150)
+- Hough Min Line Length (10-150)
+- Smoothing Factor (0-1)
 
-# Run tests
-pytest
-```
+**Decision Parameters (PID tuning):**
+- Kp - Proportional gain (0-2)
+- Kd - Derivative gain (0-1)
+- Base Throttle (0-0.5)
+- Min Throttle (0-0.2)
+- Steer Threshold (0-0.5)
 
-## 🔍 Keyboard Controls
+**All changes apply instantly without restarting!**
 
-When running with visualization:
+## 📊 Performance
 
-- **Q** - Quit
-- **S** - Toggle autopilot
-- **O** - Toggle spectator overlay
-- **F** - Toggle spectator follow mode
-- **R** - Respawn vehicle
-- **T** - Teleport to next spawn point
+### Typical Latencies
+- **CARLA → Simulation:** ~5ms
+- **Simulation → LKAS:** ~5-10ms (ZMQ)
+- **LKAS Detection:** 5-15ms (CV), 20-40ms (YOLO)
+- **LKAS Decision:** <1ms
+- **LKAS → Simulation:** ~5-10ms (ZMQ)
+- **LKAS → Viewer:** ~5ms (ZMQ)
+- **Viewer → Browser:** 50-100ms (WebSocket + rendering)
+- **End-to-End (CARLA → Browser):** ~100-200ms
 
-## 📊 Performance Metrics
+### Optimization Tips
 
-```
-Frame 00150 | FPS: 28.5 | Lanes: LR | Steering: +0.123 | Timeouts: 0
-```
-
-## 📋 System Requirements
-
-### For M1 Mac Development
-- Docker Desktop with Rosetta 2 enabled
-- VSCode with Dev Containers extension
-- Remote Linux machine running CARLA server
-
-### For Native Linux Development
-- Ubuntu 18.04+
-- CARLA 0.9.15+ simulator
-- Python 3.10+
-- GPU (optional, for deep learning)
-
-## 🚀 Development Setup
-
-### Native Development
-
-```bash
-# Clone and install
-git clone <repository-url>
-cd seame-ads
-pip install -e ".[dev]"
-
-# Start developing
-lane-detection --help
-simulation --help
-```
-
-### Dev Container (M1 Mac / Remote Development)
-
-1. **Open in Dev Container:**
-   ```bash
-   cd seame-ads
-   code .
-   # VSCode: Cmd+Shift+P → "Reopen in Container"
+1. **Reduce camera resolution:**
+   ```yaml
+   camera:
+     width: 640
+     height: 480
    ```
 
-2. **Package is auto-installed in container**
-   ```bash
-   # Use entry points directly
-   lane-detection --method cv --port 5556
-   simulation --detector-url tcp://localhost:5556 --viewer web
+2. **Adjust WebSocket frame rate:**
+   ```python
+   # In viewer/run.py
+   self.ws_frame_interval = 1.0 / 30.0  # 30 FPS (default)
    ```
 
-See [.docs/DEVCONTAINER_SETUP.md](.docs/DEVCONTAINER_SETUP.md) for details.
+3. **Lower JPEG quality:**
+   ```python
+   # In viewer/run.py
+   cv2.imencode('.jpg', ..., [cv2.IMWRITE_JPEG_QUALITY, 70])
+   ```
+
+4. **Use OpenCV for detection:**
+   ```bash
+   lkas --method cv  # Faster than YOLO
+   ```
+
+## 🔧 Development
+
+### Testing WebSocket Connection
+
+```bash
+# Terminal 1: Start viewer
+viewer
+
+# Terminal 2: Test WebSocket
+python3 src/viewer/test_websocket.py
+
+# Expected output:
+# ✓ Connected to ws://localhost:8081
+# ✓ Sent test message
+# ✓ Received frame (binary)
+# ✓ Received status (JSON)
+```
+
+### Debugging
+
+**Enable verbose logging:**
+```bash
+lkas --method cv --broadcast --verbose
+simulation --broadcast --verbose
+viewer --verbose
+```
+
+**Check ZMQ ports:**
+```bash
+ss -tlnp | grep '555[7-9]\|556[0-3]'
+```
+
+**Monitor WebSocket:**
+```bash
+# Check WebSocket server
+ss -tlnp | grep 8081
+
+# Browser console (F12)
+# Check connection status and frame reception
+```
+
+### Adding Custom Detection Method
+
+```python
+# In lkas/detection/<method>/detector.py
+from lkas.detection.core.detector import LaneDetector
+
+class MyDetector(LaneDetector):
+    def detect(self, image):
+        # Your detection logic
+        left_lane = (x1, y1, x2, y2)
+        right_lane = (x1, y1, x2, y2)
+        return left_lane, right_lane
+
+# Register in lkas/detection/core/detector.py
+DETECTORS = {
+    'cv': CVDetector,
+    'yolo': YOLODetector,
+    'my_method': MyDetector,
+}
+
+# Use it
+lkas --method my_method --broadcast
+```
+
+## 🐛 Troubleshooting
+
+### CARLA Connection Failed
+```
+Error: Could not connect to CARLA
+```
+**Fix:**
+- Ensure CARLA is running: `./CarlaUE4.sh`
+- Check host/port in config.yaml
+- Verify firewall settings
+
+### WebSocket Not Connecting
+```
+Connection: Disconnected (red)
+```
+**Fix:**
+```bash
+# Check viewer is running
+ps aux | grep viewer
+
+# Verify WebSocket server started
+# Should see: ✓ WebSocket server started on port 8081
+
+# Test connection
+python3 src/viewer/test_websocket.py
+
+# Check firewall
+sudo ufw allow 8081
+```
+
+### High Latency (>1 second)
+```
+Latency: 5000+ms
+```
+**Fix:**
+- Reduce JPEG quality (viewer/run.py, line ~290)
+- Lower camera resolution (config.yaml)
+- Reduce frame rate limit (viewer/run.py, line ~104)
+
+### Parameters Not Updating
+```
+Slider moves but behavior doesn't change
+```
+**Fix:**
+- Check LKAS is running with `--broadcast` flag
+- Verify parameter port: `ss -tlnp | grep 5559`
+- Check browser console for errors
 
 ## 📚 Documentation
 
-| Document | Description |
-|----------|-------------|
-| [docs/README.md](docs/README.md) | Documentation index |
-| [src/lkas/detection/README.md](src/lkas/detection/README.md) | Detection module guide |
-| [src/simulation/README.md](src/simulation/README.md) | Simulation module guide |
-| [src/viewer/README.md](src/viewer/README.md) | Viewer module guide |
+Detailed documentation for each module:
 
-## 🎓 For Students
+| Module | Documentation |
+|--------|---------------|
+| **LKAS** | [src/lkas/README.md](src/lkas/README.md) |
+| **Simulation** | [src/simulation/README.md](src/simulation/README.md) |
+| **Viewer** | [src/viewer/README.md](src/viewer/README.md) |
 
-This project demonstrates:
+## 🎓 Key Technologies
 
-- ✅ **Clean Architecture**: Separation of concerns
-- ✅ **Design Patterns**: Factory, Strategy, Observer
-- ✅ **Distributed Systems**: ZMQ communication
-- ✅ **Multiple Algorithms**: CV and DL approaches
-- ✅ **Production Ready**: Error handling, logging, metrics
+- **CARLA Simulator** - Realistic autonomous driving environment
+- **OpenCV** - Computer vision for lane detection
+- **ZMQ (ZeroMQ)** - High-performance distributed messaging
+- **WebSocket** - Real-time bidirectional browser communication
+- **Python asyncio** - Asynchronous WebSocket server
+- **PID Controller** - Smooth vehicle steering control
 
-## 🆘 Quick Reference
+## 🏆 Highlights
 
-### Installed Commands
+### WebSocket Improvements
+- ✅ **Binary frames** - No base64 overhead (33% size reduction!)
+- ✅ **Frame rate limiting** - 30 FPS max prevents flooding
+- ✅ **Instant reconnection** - Auto-reconnect on disconnect
+- ✅ **Low latency** - ~50-100ms browser latency
+- ✅ **Efficient encoding** - JPEG quality balanced for speed
 
-After `pip install -e .`, you get two entry points:
+### Architecture Benefits
+- ✅ **Modular design** - Clean separation of concerns
+- ✅ **Process isolation** - Independent module lifecycles
+- ✅ **ZMQ broker** - Centralized communication hub
+- ✅ **Distributed ready** - Run modules on different machines
+- ✅ **Live tuning** - Adjust parameters without restart
 
-| Command | Purpose | Equivalent Python Module |
-|---------|---------|--------------------------|
-| `lkas` | Integrated LKAS | `python -m lkas.run` |
-| `simulation` | CARLA simulation | `python -m simulation.run` |
-| `lane-detection` | Detection server | `python -m lkas.detection.run` |
-| `decision-server` | Decision server | `python -m lkas.decision.run` |
-| `viewer` | Web viewer | `python -m viewer.run` |
+### Production Ready
+- ✅ **Error handling** - Graceful degradation
+- ✅ **Comprehensive logging** - Detailed diagnostics
+- ✅ **Performance monitoring** - Real-time metrics
+- ✅ **Fault tolerance** - Auto-reconnection and retry logic
+- ✅ **Testing tools** - WebSocket test client included
 
-### Command Templates
+## 📦 Package Information
 
-```bash
-# Integrated mode (simplest, uses config.yaml for ports)
-lkas --method cv --viewer web
+- **Name:** `ads-skynet`
+- **Version:** 0.1.0
+- **Python:** 3.10+
+- **License:** See LICENSE file
 
-# Modular mode (separate processes)
-lane-detection --method cv
-decision-server
-simulation --viewer web
+## 🚀 Getting Started
 
-# Override web port from command line
-simulation --viewer web --web-port 8081
+Ready to run? Follow the [Quick Start](#-quick-start) guide above!
 
-# Remote CARLA + custom config
-simulation \
-  --host <REMOTE_IP> \
-  --port 2000 \
-  --config /path/to/config.yaml \
-  --viewer web
-```
+**New to the project?** Start with these steps:
+1. Install package: `pip install -e .`
+2. Start CARLA: `./CarlaUE4.sh`
+3. Start LKAS: `lkas --method cv --broadcast`
+4. Start simulation: `simulation --broadcast`
+5. Start viewer: `viewer`
+6. Open browser: http://localhost:8080
 
-### Package Structure
-
-After installation, import modules directly:
-
-```python
-# Import LKAS detection
-from lkas.detection.core.config import ConfigManager
-from lkas.detection.core.models import Lane, DetectionResult
-from lkas.detection import LaneDetection, DetectionClient
-
-# Import LKAS decision
-from lkas.decision import DecisionServer, DecisionClient
-
-# Import simulation
-from simulation import SimulationOrchestrator
-from simulation.integration import DetectionClient, DecisionClient
-```
-
-## ✅ Why This Structure?
-
-1. **`lkas/` is self-contained** - Complete lane keeping system, reusable in any project
-2. **`lkas/detection/` is pure algorithms** - No CARLA dependency, works anywhere
-3. **`lkas/decision/` is reusable logic** - Works with any detection system
-4. **`simulation/` orchestrates** - CARLA-specific integration and coordination
-5. **Shared memory IPC** - Low-latency inter-process communication
-6. **Clear responsibilities** - Each module has ONE job
-7. **Easy to test** - Pure functions, no entangled dependencies
-
-## 🎁 Modern Python Package Benefits
-
-This project uses modern Python packaging (`pyproject.toml`) instead of legacy `setup.py` and `requirements.txt`:
-
-### ✅ Benefits
-
-1. **Single Source of Truth** - All configuration in `pyproject.toml`
-   - Dependencies, metadata, build config, tool settings
-   - No more scattered `setup.py`, `requirements.txt`, `setup.cfg`, etc.
-
-2. **Clean Imports** - No more `sys.path` hacks!
-   ```python
-   # ❌ Old way (brittle)
-   sys.path.insert(0, str(Path(__file__).parent.parent))
-   from detection.core.models import Lane
-
-   # ✅ New way (clean)
-   from detection.core.models import Lane
-   ```
-
-3. **Entry Point Scripts** - Installed commands available system-wide
-   ```bash
-   simulation --help      # Works from any directory
-   lane-detection --help  # No need to cd into specific folders
-   ```
-
-4. **Editable Install** - Changes reflect immediately
-   ```bash
-   pip install -e .       # Edit code and run without reinstalling
-   ```
-
-5. **Optional Dependencies** - Install only what you need
-   ```bash
-   pip install -e .           # Basic install
-   pip install -e ".[dev]"    # + development tools
-   pip install -e ".[train]"  # + ML training tools
-   pip install -e ".[all]"    # Everything
-   ```
-
-6. **Auto-Config Discovery** - Config file found automatically
-   - Looks for `pyproject.toml` to find project root
-   - Loads `config.yaml` from project root automatically
-   - No hardcoded paths or relative path issues
-
-7. **Tool Configuration** - Unified config for dev tools
-   - pytest, black, mypy, isort all configured in `pyproject.toml`
-   - Consistent formatting across team
-
-### 📦 Package Info
-
-- **Name**: `ads-skynet`
-- **Version**: 0.1.0
-- **Python**: 3.10+
-- **License**: See LICENSE file
-
-## 📝 License
-
-See [LICENSE](LICENSE) file.
+**Questions?** Check the [Troubleshooting](#-troubleshooting) section or module-specific READMEs.
 
 ---
 
-**Ready to start?** 👉 See [Quick Start](#-quick-start) above
+**Built with ❤️ for autonomous driving education and research**
