@@ -49,6 +49,9 @@ dependencies = [
 
     # Visualization
     "matplotlib>=3.7.0,<4.0.0",
+
+    # Shared types and utilities
+    "skynet-common @ git+https://github.com/ADS-Skynet/Common.git",
 ]
 
 # Optional dependency groups
