@@ -86,10 +86,20 @@ decision-server = "lkas.decision.run:main"
 
 # Package discovery (src-layout)
 [tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
+package-dir = {"lkas" = "src"}
+packages = [
+    "lkas",
+    "lkas.decision",
+    "lkas.detection",
+    "lkas.detection.core",
+    "lkas.detection.method",
+    "lkas.detection.method.deep_learning",
+    "lkas.detection.method.computer_vision",
+    "lkas.integration",
+    "lkas.integration.zmq",
+    "lkas.integration.shared_memory",
+    "lkas.utils",
+]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.yml", "*.json"]
