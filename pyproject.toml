@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "seame-ads"
+name = "skynet-lkas"
 version = "0.1.0"
-description = "Autonomous Driving Lane Keeping System for CARLA simulator"
+description = "Lane Keeping Assist System - Detection and Decision Module"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "See LICENSE file" }
@@ -13,7 +13,7 @@ authors = [{ name = "Skynet" }]
 keywords = [
     "autonomous-driving",
     "lane-detection",
-    "carla",
+    "lane-keeping",
     "computer-vision",
     "deep-learning",
 ]
@@ -32,9 +32,6 @@ dependencies = [
     "torchvision>=0.15.0,<1.0.0",
     "segmentation-models-pytorch>=0.3.0",
 
-    # CARLA Simulator Python API
-    "carla==0.9.16",
-
     # Image Processing
     "pillow>=10.0.0,<13.0.0",
 
@@ -52,9 +49,9 @@ dependencies = [
 
     # Visualization
     "matplotlib>=3.7.0,<4.0.0",
-    "flask>=2.3.0,<4.0.0",
-    "werkzeug>=2.3.0,<4.0.0",
-    "pygame>=2.5.0,<3.0.0",
+
+    # Shared types and utilities
+    "skynet-common @ git+https://github.com/ADS-Skynet/Common.git",
 ]
 
 # Optional dependency groups
@@ -77,27 +74,35 @@ train = [
 ]
 
 # All optional dependencies
-all = ["seame-ads[dev,train]"]
+all = ["skynet-ads[dev,train]"]
 
 # [project.urls]
-# Homepage = "https://github.com/your-org/seame-ads"
-# Repository = "https://github.com/your-org/seame-ads"
-# Documentation = "https://github.com/your-org/seame-ads/tree/main/.docs"
+# Homepage = "https://github.com/ADS-Skynet"
+# Repository = "https://github.com/ADS-Skynet/Lkas"
+# Documentation = ""
 
 # Entry points for command-line scripts
 [project.scripts]
 lkas = "lkas.run:main"
 detection-server = "lkas.detection.run:main"
 decision-server = "lkas.decision.run:main"
-simulation = "simulation.run:main"
-viewer = "viewer.run:main"
 
 # Package discovery (src-layout)
 [tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
+package-dir = {"lkas" = "src"}
+packages = [
+    "lkas",
+    "lkas.decision",
+    "lkas.detection",
+    "lkas.detection.core",
+    "lkas.detection.method",
+    "lkas.detection.method.deep_learning",
+    "lkas.detection.method.computer_vision",
+    "lkas.integration",
+    "lkas.integration.zmq",
+    "lkas.integration.shared_memory",
+    "lkas.utils",
+]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.yml", "*.json"]
