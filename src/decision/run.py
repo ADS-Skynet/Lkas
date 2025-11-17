@@ -36,7 +36,7 @@ from skynet_common.config import ConfigManager
 from lkas.integration.messages import DetectionMessage, ControlMessage
 from lkas.integration.shared_memory import SharedMemoryDetectionChannel, SharedMemoryControlChannel
 from lkas.decision import DecisionController
-from simulation.constants import CommunicationConstants
+# from simulation.constants import CommunicationConstants
 
 
 class DecisionServer:
@@ -241,6 +241,10 @@ class DecisionServer:
 
 def main():
     """Main entry point for decision server."""
+    # Load common config for defaults
+    common_config = ConfigManager.load()
+    comm = common_config.communication
+
     parser = argparse.ArgumentParser(description="Standalone Decision Server")
 
     parser.add_argument(
@@ -248,20 +252,6 @@ def main():
         type=str,
         default=None,
         help="Path to configuration file (default: <project-root>/config.yaml)",
-    )
-
-    # Shared memory options
-    parser.add_argument(
-        "--detection-shm-name",
-        type=str,
-        default=CommunicationConstants.DEFAULT_DETECTION_SHM_NAME,
-        help=f"Shared memory name for detection input (default: {CommunicationConstants.DEFAULT_DETECTION_SHM_NAME})",
-    )
-    parser.add_argument(
-        "--control-shm-name",
-        type=str,
-        default=CommunicationConstants.DEFAULT_CONTROL_SHM_NAME,
-        help=f"Shared memory name for control output (default: {CommunicationConstants.DEFAULT_CONTROL_SHM_NAME})",
     )
 
     # Connection retry options
@@ -293,8 +283,8 @@ def main():
     # Create and run server
     server = DecisionServer(
         config=config,
-        detection_shm_name=args.detection_shm_name,
-        control_shm_name=args.control_shm_name,
+        detection_shm_name=comm.detection_shm_name,
+        control_shm_name=comm.control_shm_name,
         retry_count=args.retry_count,
         retry_delay=args.retry_delay,
     )

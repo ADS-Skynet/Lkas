@@ -302,12 +302,16 @@ class LKASBroker:
 
             self.vehicle_status_count += 1
 
-            # Debug: Log pause state changes (disabled - use --verbose flag on lkas launcher)
-            if self.verbose and self.vehicle_status_count % 50 == 0:  # Every 50 messages
-                paused = data.get('paused', False)
-                steering = data.get('steering', 0.0)
-                speed_kmh = data.get('speed_kmh', 0.0)
-                print(f"[Broker] Vehicle status: paused={paused}, steering={steering:.3f}, speed={speed_kmh:.1f}km/h")
+            # Debug: Log pause state changes
+            # Log first message and paused state changes
+            paused = data.get('paused', False)
+            steering = data.get('steering', 0.0)
+            speed_kmh = data.get('speed_kmh', 0.0)
+
+            if self.vehicle_status_count == 1:
+                print(f"[Broker] First vehicle status received: paused={paused}, steering={steering:.3f}")
+            elif self.verbose and self.vehicle_status_count % 50 == 0:  # Every 50 messages
+                print(f"[Broker] Vehicle status #{self.vehicle_status_count}: paused={paused}, steering={steering:.3f}, speed={speed_kmh:.1f}km/h")
 
             return True
 
@@ -324,7 +328,7 @@ class LKASBroker:
     # Broadcasting Methods
     # =========================================================================
 
-    def broadcast_frame(self, image: np.ndarray, frame_id: int, jpeg_quality: int = 85):
+    def broadcast_frame(self, image: np.ndarray, frame_id: int, jpeg_quality: int = 85, raw_rgb: bool = False):
         """
         Broadcast frame to viewers.
 
@@ -332,8 +336,9 @@ class LKASBroker:
             image: Image array (RGB or BGR)
             frame_id: Frame sequence number
             jpeg_quality: JPEG compression quality (0-100)
+            raw_rgb: Send raw RGB instead of JPEG (faster for localhost)
         """
-        self.broadcaster.send_frame(image, frame_id, jpeg_quality)
+        self.broadcaster.send_frame(image, frame_id, jpeg_quality, raw_rgb)
 
     def broadcast_detection(self, detection_data: Dict[str, Any], frame_id: int = None):
         """
@@ -453,3 +458,52 @@ while running:
 if broker:
     broker.close()
 """
+
+
+def create_broker_from_config(verbose: bool = False) -> LKASBroker:
+    """
+    Create LKASBroker with settings from common config.
+
+    This factory function loads ZMQ ports from the shared configuration,
+    ensuring consistency across all modules.
+
+    Args:
+        verbose: Enable verbose logging
+
+    Returns:
+        LKASBroker instance configured from common config
+    """
+    try:
+        from skynet_common.config import ConfigManager
+        config = ConfigManager.load()
+        comm = config.communication
+
+        # Build URLs from common config
+        # Note: These are standard LKAS broker ports based on common config
+        # Parameter broker: receive from viewer (zmq_parameter_port), forward to servers
+        parameter_viewer_url = f"tcp://*:{comm.zmq_parameter_port}"
+        parameter_servers_url = f"tcp://*:{comm.zmq_parameter_port + 1}"  # 5560
+
+        # Action broker: receive from viewer (zmq_action_port), forward to simulation
+        action_url = f"tcp://*:{comm.zmq_action_port}"
+        action_forward_url = f"tcp://*:{comm.zmq_action_port + 3}"  # 5561
+
+        # Vehicle status: receive from simulation
+        vehicle_status_url = f"tcp://*:{comm.zmq_action_port + 4}"  # 5562
+
+        # Broadcast: send to viewers
+        broadcast_url = f"tcp://*:{comm.zmq_broadcast_port}"
+
+        return LKASBroker(
+            parameter_viewer_url=parameter_viewer_url,
+            parameter_servers_url=parameter_servers_url,
+            action_url=action_url,
+            action_forward_url=action_forward_url,
+            vehicle_status_url=vehicle_status_url,
+            broadcast_url=broadcast_url,
+            verbose=verbose
+        )
+    except Exception as e:
+        print(f"Warning: Could not load common config: {e}")
+        print("Using default broker settings")
+        return LKASBroker(verbose=verbose)

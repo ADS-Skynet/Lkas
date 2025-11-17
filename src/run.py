@@ -30,7 +30,6 @@ from typing import List
 
 from lkas.utils.terminal import TerminalDisplay, OrderedLogger
 from skynet_common.config import ConfigManager
-from lkas.constants import LauncherConstants
 import yaml
 
 
@@ -109,36 +108,36 @@ class LKASLauncher:
             except Exception:
                 pass  # Use empty dict if loading fails
 
-        # Process configuration: parameters > config.yaml > constants
+        # Process configuration: parameters > config.yaml > system_config defaults
         self.retry_count = (
             retry_count if retry_count is not None
-            else launcher_config.get('retry_count', LauncherConstants.DEFAULT_RETRY_COUNT)
+            else launcher_config.get('retry_count', self.system_config.retry.max_retries)
         )
         self.retry_delay = (
             retry_delay if retry_delay is not None
-            else launcher_config.get('retry_delay', LauncherConstants.DEFAULT_RETRY_DELAY)
+            else launcher_config.get('retry_delay', self.system_config.retry.retry_delay_s)
         )
         self.decision_init_timeout = (
             decision_init_timeout if decision_init_timeout is not None
-            else launcher_config.get('decision_init_timeout', LauncherConstants.DEFAULT_DECISION_INIT_TIMEOUT)
+            else launcher_config.get('decision_init_timeout', self.system_config.launcher.decision_init_timeout_s)
         )
         self.detection_init_timeout = (
             detection_init_timeout if detection_init_timeout is not None
-            else launcher_config.get('detection_init_timeout', LauncherConstants.DEFAULT_DETECTION_INIT_TIMEOUT)
+            else launcher_config.get('detection_init_timeout', self.system_config.launcher.detection_init_timeout_s)
         )
         self.process_stop_timeout = (
             process_stop_timeout if process_stop_timeout is not None
-            else launcher_config.get('process_stop_timeout', LauncherConstants.DEFAULT_PROCESS_STOP_TIMEOUT)
+            else launcher_config.get('process_stop_timeout', self.system_config.launcher.process_stop_timeout_s)
         )
 
         # Terminal configuration
         self.terminal_width = (
             terminal_width if terminal_width is not None
-            else launcher_config.get('terminal_width', LauncherConstants.DEFAULT_TERMINAL_WIDTH)
+            else launcher_config.get('terminal_width', self.system_config.launcher.terminal_width)
         )
         self.log_file_path = (
             log_file if log_file is not None
-            else launcher_config.get('log_file', LauncherConstants.DEFAULT_LOG_FILE)
+            else launcher_config.get('log_file', self.system_config.launcher.log_file)
         )
         self.enable_footer = (
             enable_footer if enable_footer is not None
@@ -148,11 +147,12 @@ class LKASLauncher:
         # Broadcasting configuration
         self.jpeg_quality = (
             jpeg_quality if jpeg_quality is not None
-            else launcher_config.get('jpeg_quality', LauncherConstants.DEFAULT_JPEG_QUALITY)
+            else launcher_config.get('jpeg_quality', self.system_config.streaming.jpeg_quality)
         )
+        self.raw_rgb = launcher_config.get('raw_rgb', self.system_config.streaming.raw_rgb)
         self.broadcast_log_interval = (
             broadcast_log_interval if broadcast_log_interval is not None
-            else launcher_config.get('broadcast_log_interval', LauncherConstants.DEFAULT_BROADCAST_LOG_INTERVAL)
+            else launcher_config.get('broadcast_log_interval', self.system_config.streaming.broadcast_log_interval)
         )
 
         # Process handles
@@ -164,9 +164,18 @@ class LKASLauncher:
         # Shared memory channels for broadcasting (only if broadcast enabled)
         self.image_channel = None
         self.detection_channel = None
+        self.last_broadcast_frame_id = -1
+        self.last_broadcast_detection_id = -1
+
+        # FPS tracking for footer
+        self.broadcast_frame_count = 0
+        self.broadcast_detection_count = 0
+        self.last_fps_update_time = time.time()
+        self.current_frame_fps = 0.0
+        self.current_detection_fps = 0.0
 
         # Terminal display with persistent footer
-        subprocess_prefix = LauncherConstants.DEFAULT_SUBPROCESS_PREFIX
+        subprocess_prefix = self.system_config.launcher.subprocess_prefix
         self.terminal = TerminalDisplay(enable_footer=self.enable_footer)
         self.detection_logger = OrderedLogger(subprocess_prefix, self.terminal)
         self.decision_logger = OrderedLogger(subprocess_prefix, self.terminal)
@@ -221,10 +230,6 @@ class LKASLauncher:
             sys.executable,
             "-m",
             "lkas.decision.run",
-            "--detection-shm-name",
-            self.detection_shm_name,
-            "--control-shm-name",
-            self.control_shm_name,
             "--retry-count",
             str(self.retry_count),
             "--retry-delay",
@@ -282,7 +287,7 @@ class LKASLauncher:
             try:
                 # Read available data (non-blocking)
                 # Stats lines end with \r, regular lines end with \n
-                data = process.stdout.read(LauncherConstants.DEFAULT_BUFFER_READ_SIZE)
+                data = process.stdout.read(self.system_config.launcher.buffer_read_size)
                 if data:
                     lines_raw = data.decode('utf-8')
                     lines = lines_raw.splitlines(keepends=True)
@@ -313,7 +318,7 @@ class LKASLauncher:
             # Fallback for Windows
             try:
                 # Try to read available data
-                data = process.stdout.read(LauncherConstants.DEFAULT_BUFFER_READ_SIZE)
+                data = process.stdout.read(self.system_config.launcher.buffer_read_size)
                 if data:
                     lines_raw = data.decode('utf-8')
                     lines = lines_raw.splitlines(keepends=True)
@@ -455,12 +460,15 @@ class LKASLauncher:
         if self.image_channel:
             try:
                 image_msg = self.image_channel.read(copy=False)  # Non-blocking read
-                if image_msg is not None:
+                if image_msg is not None and image_msg.frame_id != self.last_broadcast_frame_id:
                     self.broker.broadcast_frame(
                         image_msg.image,
                         image_msg.frame_id,
-                        jpeg_quality=self.jpeg_quality
+                        jpeg_quality=self.jpeg_quality,
+                        raw_rgb=self.raw_rgb
                     )
+                    self.last_broadcast_frame_id = image_msg.frame_id
+                    self.broadcast_frame_count += 1
             except Exception:
                 pass  # Silently ignore read errors
 
@@ -468,7 +476,7 @@ class LKASLauncher:
         if self.detection_channel:
             try:
                 detection_msg = self.detection_channel.read()  # Non-blocking read
-                if detection_msg is not None:
+                if detection_msg is not None and detection_msg.frame_id != self.last_broadcast_detection_id:
                     # Convert detection message to viewer format (line segments, not arrays)
                     # Viewer expects DetectionData: {left_lane, right_lane, processing_time_ms, frame_id}
                     # Each lane: {x1, y1, x2, y2, confidence} or None
@@ -491,12 +499,31 @@ class LKASLauncher:
                         'frame_id': detection_msg.frame_id,
                     }
                     self.broker.broadcast_detection(detection_data, detection_msg.frame_id)
+                    self.last_broadcast_detection_id = detection_msg.frame_id
+                    self.broadcast_detection_count += 1
                     # Log successful broadcast at configured interval (only in verbose mode)
                     if self.verbose and detection_msg.frame_id % self.broadcast_log_interval == 0:
                         self.terminal.print(f"[Broker] Detection: frame {detection_msg.frame_id}, L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None}")
             except Exception as e:
                 # Log errors to help diagnose issues
                 self.terminal.print(f"Warning: Failed to broadcast detection: {e}")
+
+        # Update FPS stats in footer (every 1 second)
+        now = time.time()
+        if now - self.last_fps_update_time >= 1.0:
+            elapsed = now - self.last_fps_update_time
+            self.current_frame_fps = self.broadcast_frame_count / elapsed
+            self.current_detection_fps = self.broadcast_detection_count / elapsed
+
+            # Update footer with FPS stats
+            self.terminal.update_footer(fps_stats={
+                'Frame': self.current_frame_fps,
+                'Detection': self.current_detection_fps
+            })
+
+            self.broadcast_frame_count = 0
+            self.broadcast_detection_count = 0
+            self.last_fps_update_time = now
 
     def run(self):
         """Start both servers and manage their lifecycle."""
@@ -560,7 +587,7 @@ class LKASLauncher:
                 return 1
 
             # Small delay before starting detection server
-            time.sleep(LauncherConstants.DEFAULT_POST_DECISION_DELAY)
+            time.sleep(self.system_config.timing.post_decision_delay_s)
 
             # Start detection server AFTER decision is ready
             self.terminal.print("\nStarting detection server...")
@@ -658,7 +685,7 @@ class LKASLauncher:
                     break
 
                 # Small sleep to prevent busy-waiting
-                time.sleep(LauncherConstants.DEFAULT_MAIN_LOOP_SLEEP)
+                time.sleep(self.system_config.timing.main_loop_sleep_s)
 
         except Exception as e:
             self.terminal.clear_footer()
