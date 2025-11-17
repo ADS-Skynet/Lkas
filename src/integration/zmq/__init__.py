@@ -16,12 +16,13 @@ Public API:
         - ActionRequest: Action request message
 """
 
-from .broker import LKASBroker
+from .broker import LKASBroker, create_broker_from_config
 from .client import ParameterClient
 from .messages import VehicleState, ParameterUpdate, ActionRequest
 
 __all__ = [
     "LKASBroker",
+    "create_broker_from_config",
     "ParameterClient",
     "VehicleState",
     "ParameterUpdate",

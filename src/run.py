@@ -30,7 +30,6 @@ from typing import List
 
 from lkas.utils.terminal import TerminalDisplay, OrderedLogger
 from skynet_common.config import ConfigManager
-from lkas.constants import LauncherConstants
 import yaml
 
 
@@ -109,36 +108,36 @@ class LKASLauncher:
             except Exception:
                 pass  # Use empty dict if loading fails
 
-        # Process configuration: parameters > config.yaml > constants
+        # Process configuration: parameters > config.yaml > system_config defaults
         self.retry_count = (
             retry_count if retry_count is not None
-            else launcher_config.get('retry_count', LauncherConstants.DEFAULT_RETRY_COUNT)
+            else launcher_config.get('retry_count', self.system_config.retry.max_retries)
         )
         self.retry_delay = (
             retry_delay if retry_delay is not None
-            else launcher_config.get('retry_delay', LauncherConstants.DEFAULT_RETRY_DELAY)
+            else launcher_config.get('retry_delay', self.system_config.retry.retry_delay_s)
         )
         self.decision_init_timeout = (
             decision_init_timeout if decision_init_timeout is not None
-            else launcher_config.get('decision_init_timeout', LauncherConstants.DEFAULT_DECISION_INIT_TIMEOUT)
+            else launcher_config.get('decision_init_timeout', self.system_config.launcher.decision_init_timeout_s)
         )
         self.detection_init_timeout = (
             detection_init_timeout if detection_init_timeout is not None
-            else launcher_config.get('detection_init_timeout', LauncherConstants.DEFAULT_DETECTION_INIT_TIMEOUT)
+            else launcher_config.get('detection_init_timeout', self.system_config.launcher.detection_init_timeout_s)
         )
         self.process_stop_timeout = (
             process_stop_timeout if process_stop_timeout is not None
-            else launcher_config.get('process_stop_timeout', LauncherConstants.DEFAULT_PROCESS_STOP_TIMEOUT)
+            else launcher_config.get('process_stop_timeout', self.system_config.launcher.process_stop_timeout_s)
         )
 
         # Terminal configuration
         self.terminal_width = (
             terminal_width if terminal_width is not None
-            else launcher_config.get('terminal_width', LauncherConstants.DEFAULT_TERMINAL_WIDTH)
+            else launcher_config.get('terminal_width', self.system_config.launcher.terminal_width)
         )
         self.log_file_path = (
             log_file if log_file is not None
-            else launcher_config.get('log_file', LauncherConstants.DEFAULT_LOG_FILE)
+            else launcher_config.get('log_file', self.system_config.launcher.log_file)
         )
         self.enable_footer = (
             enable_footer if enable_footer is not None
@@ -148,11 +147,11 @@ class LKASLauncher:
         # Broadcasting configuration
         self.jpeg_quality = (
             jpeg_quality if jpeg_quality is not None
-            else launcher_config.get('jpeg_quality', LauncherConstants.DEFAULT_JPEG_QUALITY)
+            else launcher_config.get('jpeg_quality', self.system_config.streaming.jpeg_quality)
         )
         self.broadcast_log_interval = (
             broadcast_log_interval if broadcast_log_interval is not None
-            else launcher_config.get('broadcast_log_interval', LauncherConstants.DEFAULT_BROADCAST_LOG_INTERVAL)
+            else launcher_config.get('broadcast_log_interval', self.system_config.streaming.broadcast_log_interval)
         )
 
         # Process handles
@@ -166,7 +165,7 @@ class LKASLauncher:
         self.detection_channel = None
 
         # Terminal display with persistent footer
-        subprocess_prefix = LauncherConstants.DEFAULT_SUBPROCESS_PREFIX
+        subprocess_prefix = self.system_config.launcher.subprocess_prefix
         self.terminal = TerminalDisplay(enable_footer=self.enable_footer)
         self.detection_logger = OrderedLogger(subprocess_prefix, self.terminal)
         self.decision_logger = OrderedLogger(subprocess_prefix, self.terminal)
@@ -221,10 +220,6 @@ class LKASLauncher:
             sys.executable,
             "-m",
             "lkas.decision.run",
-            "--detection-shm-name",
-            self.detection_shm_name,
-            "--control-shm-name",
-            self.control_shm_name,
             "--retry-count",
             str(self.retry_count),
             "--retry-delay",
@@ -282,7 +277,7 @@ class LKASLauncher:
             try:
                 # Read available data (non-blocking)
                 # Stats lines end with \r, regular lines end with \n
-                data = process.stdout.read(LauncherConstants.DEFAULT_BUFFER_READ_SIZE)
+                data = process.stdout.read(self.system_config.launcher.buffer_read_size)
                 if data:
                     lines_raw = data.decode('utf-8')
                     lines = lines_raw.splitlines(keepends=True)
@@ -313,7 +308,7 @@ class LKASLauncher:
             # Fallback for Windows
             try:
                 # Try to read available data
-                data = process.stdout.read(LauncherConstants.DEFAULT_BUFFER_READ_SIZE)
+                data = process.stdout.read(self.system_config.launcher.buffer_read_size)
                 if data:
                     lines_raw = data.decode('utf-8')
                     lines = lines_raw.splitlines(keepends=True)
@@ -560,7 +555,7 @@ class LKASLauncher:
                 return 1
 
             # Small delay before starting detection server
-            time.sleep(LauncherConstants.DEFAULT_POST_DECISION_DELAY)
+            time.sleep(self.system_config.timing.post_decision_delay_s)
 
             # Start detection server AFTER decision is ready
             self.terminal.print("\nStarting detection server...")
@@ -658,7 +653,7 @@ class LKASLauncher:
                     break
 
                 # Small sleep to prevent busy-waiting
-                time.sleep(LauncherConstants.DEFAULT_MAIN_LOOP_SLEEP)
+                time.sleep(self.system_config.timing.main_loop_sleep_s)
 
         except Exception as e:
             self.terminal.clear_footer()
