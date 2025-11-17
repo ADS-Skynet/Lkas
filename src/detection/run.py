@@ -23,12 +23,16 @@ import argparse
 import sys
 from pathlib import Path
 
-from lkas.detection.core.config import ConfigManager
+from skynet_common.config import ConfigManager
 from lkas.detection.server import DetectionServer
 
 
 def main():
     """Main entry point for detection server."""
+    # Load common config for defaults
+    common_config = ConfigManager.load()
+    comm = common_config.communication
+
     parser = argparse.ArgumentParser(description="Standalone Lane Detection Server")
 
     parser.add_argument(
@@ -49,14 +53,14 @@ def main():
     parser.add_argument(
         "--image-shm-name",
         type=str,
-        default="camera_feed",
-        help="Shared memory name for camera images (default: camera_feed)",
+        default=comm.image_shm_name,
+        help=f"Shared memory name for camera images (default: {comm.image_shm_name})",
     )
     parser.add_argument(
         "--detection-shm-name",
         type=str,
-        default="detection_results",
-        help="Shared memory name for detection results (default: detection_results)",
+        default=comm.detection_shm_name,
+        help=f"Shared memory name for detection results (default: {comm.detection_shm_name})",
     )
 
     # GPU option

@@ -9,7 +9,7 @@ import time
 
 from lkas.integration.messages import ImageMessage, DetectionMessage, LaneMessage
 from lkas.detection.core.factory import DetectorFactory
-from lkas.detection.core.config import Config
+from skynet_common.config import Config
 
 
 class LaneDetection:

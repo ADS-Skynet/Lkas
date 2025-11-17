@@ -32,7 +32,7 @@ import signal
 import time
 from pathlib import Path
 
-from lkas.detection.core.config import ConfigManager
+from skynet_common.config import ConfigManager
 from lkas.integration.messages import DetectionMessage, ControlMessage
 from lkas.integration.shared_memory import SharedMemoryDetectionChannel, SharedMemoryControlChannel
 from lkas.decision import DecisionController
@@ -260,8 +260,8 @@ def main():
     parser.add_argument(
         "--control-shm-name",
         type=str,
-        default="control_commands",
-        help="Shared memory name for control output (default: control_commands)",
+        default=CommunicationConstants.DEFAULT_CONTROL_SHM_NAME,
+        help=f"Shared memory name for control output (default: {CommunicationConstants.DEFAULT_CONTROL_SHM_NAME})",
     )
 
     # Connection retry options

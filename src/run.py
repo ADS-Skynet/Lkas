@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import List
 
 from lkas.utils.terminal import TerminalDisplay, OrderedLogger
-from lkas.detection.core.config import ConfigManager
+from skynet_common.config import ConfigManager
 from lkas.constants import LauncherConstants
 import yaml
 
