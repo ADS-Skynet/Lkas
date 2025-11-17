@@ -163,6 +163,8 @@ class LKASLauncher:
         # Shared memory channels for broadcasting (only if broadcast enabled)
         self.image_channel = None
         self.detection_channel = None
+        self.last_broadcast_frame_id = -1
+        self.last_broadcast_detection_id = -1
 
         # Terminal display with persistent footer
         subprocess_prefix = self.system_config.launcher.subprocess_prefix
@@ -450,12 +452,13 @@ class LKASLauncher:
         if self.image_channel:
             try:
                 image_msg = self.image_channel.read(copy=False)  # Non-blocking read
-                if image_msg is not None:
+                if image_msg is not None and image_msg.frame_id != self.last_broadcast_frame_id:
                     self.broker.broadcast_frame(
                         image_msg.image,
                         image_msg.frame_id,
                         jpeg_quality=self.jpeg_quality
                     )
+                    self.last_broadcast_frame_id = image_msg.frame_id
             except Exception:
                 pass  # Silently ignore read errors
 
@@ -463,7 +466,7 @@ class LKASLauncher:
         if self.detection_channel:
             try:
                 detection_msg = self.detection_channel.read()  # Non-blocking read
-                if detection_msg is not None:
+                if detection_msg is not None and detection_msg.frame_id != self.last_broadcast_detection_id:
                     # Convert detection message to viewer format (line segments, not arrays)
                     # Viewer expects DetectionData: {left_lane, right_lane, processing_time_ms, frame_id}
                     # Each lane: {x1, y1, x2, y2, confidence} or None
@@ -486,6 +489,7 @@ class LKASLauncher:
                         'frame_id': detection_msg.frame_id,
                     }
                     self.broker.broadcast_detection(detection_data, detection_msg.frame_id)
+                    self.last_broadcast_detection_id = detection_msg.frame_id
                     # Log successful broadcast at configured interval (only in verbose mode)
                     if self.verbose and detection_msg.frame_id % self.broadcast_log_interval == 0:
                         self.terminal.print(f"[Broker] Detection: frame {detection_msg.frame_id}, L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None}")
