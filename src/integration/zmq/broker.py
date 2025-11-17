@@ -302,12 +302,16 @@ class LKASBroker:
 
             self.vehicle_status_count += 1
 
-            # Debug: Log pause state changes (disabled - use --verbose flag on lkas launcher)
-            if self.verbose and self.vehicle_status_count % 50 == 0:  # Every 50 messages
-                paused = data.get('paused', False)
-                steering = data.get('steering', 0.0)
-                speed_kmh = data.get('speed_kmh', 0.0)
-                print(f"[Broker] Vehicle status: paused={paused}, steering={steering:.3f}, speed={speed_kmh:.1f}km/h")
+            # Debug: Log pause state changes
+            # Log first message and paused state changes
+            paused = data.get('paused', False)
+            steering = data.get('steering', 0.0)
+            speed_kmh = data.get('speed_kmh', 0.0)
+
+            if self.vehicle_status_count == 1:
+                print(f"[Broker] First vehicle status received: paused={paused}, steering={steering:.3f}")
+            elif self.verbose and self.vehicle_status_count % 50 == 0:  # Every 50 messages
+                print(f"[Broker] Vehicle status #{self.vehicle_status_count}: paused={paused}, steering={steering:.3f}, speed={speed_kmh:.1f}km/h")
 
             return True
 
