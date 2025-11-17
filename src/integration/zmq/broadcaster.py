@@ -54,7 +54,8 @@ class VehicleBroadcaster:
         self,
         image: np.ndarray,
         frame_id: int,
-        jpeg_quality: int = 85
+        jpeg_quality: int = 85,
+        raw_rgb: bool = False
     ):
         """
         Send video frame to viewers.
@@ -62,36 +63,62 @@ class VehicleBroadcaster:
         Args:
             image: Image array (RGB or BGR)
             frame_id: Frame sequence number
-            jpeg_quality: JPEG compression quality (0-100)
+            jpeg_quality: JPEG compression quality (0-100), ignored if raw_rgb=True
+            raw_rgb: Send raw RGB instead of JPEG (faster for localhost, larger bandwidth)
         """
-        # Compress to JPEG (10x smaller for network transfer)
-        if image.shape[2] == 3:
-            # Assume RGB, convert to BGR for OpenCV
-            image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        if raw_rgb:
+            # Send raw RGB data (no encoding overhead, ~10x larger)
+            # Convert to contiguous RGB if needed
+            if image.shape[2] == 3:
+                image_rgb = image if image.flags['C_CONTIGUOUS'] else np.ascontiguousarray(image)
+            else:
+                image_rgb = image
+
+            message = {
+                'timestamp': time.time(),
+                'frame_id': frame_id,
+                'width': image.shape[1],
+                'height': image.shape[0],
+                'format': 'raw_rgb',
+                'size': image_rgb.nbytes,
+            }
+
+            # Send multipart: [topic, metadata_json, raw_rgb_data]
+            self.socket.send_multipart([
+                b'frame',
+                json.dumps(message).encode('utf-8'),
+                image_rgb.tobytes(),
+            ])
         else:
-            image_bgr = image
+            # Compress to JPEG (10x smaller for network transfer)
+            if image.shape[2] == 3:
+                # Assume RGB, convert to BGR for OpenCV
+                image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            else:
+                image_bgr = image
 
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
-        success, buffer = cv2.imencode('.jpg', image_bgr, encode_param)
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
+            success, buffer = cv2.imencode('.jpg', image_bgr, encode_param)
 
-        if not success:
-            return
+            if not success:
+                return
 
-        # Create message metadata
-        message = {
-            'timestamp': time.time(),
-            'frame_id': frame_id,
-            'width': image.shape[1],
-            'height': image.shape[0],
-            'jpeg_size': len(buffer),
-        }
+            # Create message metadata
+            message = {
+                'timestamp': time.time(),
+                'frame_id': frame_id,
+                'width': image.shape[1],
+                'height': image.shape[0],
+                'format': 'jpeg',
+                'jpeg_size': len(buffer),
+            }
 
-        # Send multipart: [topic, metadata_json, jpeg_data]
-        self.socket.send_multipart([
-            b'frame',
-            json.dumps(message).encode('utf-8'),
-            buffer.tobytes(),
-        ])
+            # Send multipart: [topic, metadata_json, jpeg_data]
+            self.socket.send_multipart([
+                b'frame',
+                json.dumps(message).encode('utf-8'),
+                buffer.tobytes(),
+            ])
 
         self.frame_count += 1
 

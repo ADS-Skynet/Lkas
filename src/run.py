@@ -149,6 +149,7 @@ class LKASLauncher:
             jpeg_quality if jpeg_quality is not None
             else launcher_config.get('jpeg_quality', self.system_config.streaming.jpeg_quality)
         )
+        self.raw_rgb = launcher_config.get('raw_rgb', self.system_config.streaming.raw_rgb)
         self.broadcast_log_interval = (
             broadcast_log_interval if broadcast_log_interval is not None
             else launcher_config.get('broadcast_log_interval', self.system_config.streaming.broadcast_log_interval)
@@ -165,6 +166,13 @@ class LKASLauncher:
         self.detection_channel = None
         self.last_broadcast_frame_id = -1
         self.last_broadcast_detection_id = -1
+
+        # FPS tracking for footer
+        self.broadcast_frame_count = 0
+        self.broadcast_detection_count = 0
+        self.last_fps_update_time = time.time()
+        self.current_frame_fps = 0.0
+        self.current_detection_fps = 0.0
 
         # Terminal display with persistent footer
         subprocess_prefix = self.system_config.launcher.subprocess_prefix
@@ -456,9 +464,11 @@ class LKASLauncher:
                     self.broker.broadcast_frame(
                         image_msg.image,
                         image_msg.frame_id,
-                        jpeg_quality=self.jpeg_quality
+                        jpeg_quality=self.jpeg_quality,
+                        raw_rgb=self.raw_rgb
                     )
                     self.last_broadcast_frame_id = image_msg.frame_id
+                    self.broadcast_frame_count += 1
             except Exception:
                 pass  # Silently ignore read errors
 
@@ -490,12 +500,30 @@ class LKASLauncher:
                     }
                     self.broker.broadcast_detection(detection_data, detection_msg.frame_id)
                     self.last_broadcast_detection_id = detection_msg.frame_id
+                    self.broadcast_detection_count += 1
                     # Log successful broadcast at configured interval (only in verbose mode)
                     if self.verbose and detection_msg.frame_id % self.broadcast_log_interval == 0:
                         self.terminal.print(f"[Broker] Detection: frame {detection_msg.frame_id}, L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None}")
             except Exception as e:
                 # Log errors to help diagnose issues
                 self.terminal.print(f"Warning: Failed to broadcast detection: {e}")
+
+        # Update FPS stats in footer (every 1 second)
+        now = time.time()
+        if now - self.last_fps_update_time >= 1.0:
+            elapsed = now - self.last_fps_update_time
+            self.current_frame_fps = self.broadcast_frame_count / elapsed
+            self.current_detection_fps = self.broadcast_detection_count / elapsed
+
+            # Update footer with FPS stats
+            self.terminal.update_footer(fps_stats={
+                'Frame': self.current_frame_fps,
+                'Detection': self.current_detection_fps
+            })
+
+            self.broadcast_frame_count = 0
+            self.broadcast_detection_count = 0
+            self.last_fps_update_time = now
 
     def run(self):
         """Start both servers and manage their lifecycle."""

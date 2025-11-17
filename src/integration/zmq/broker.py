@@ -324,7 +324,7 @@ class LKASBroker:
     # Broadcasting Methods
     # =========================================================================
 
-    def broadcast_frame(self, image: np.ndarray, frame_id: int, jpeg_quality: int = 85):
+    def broadcast_frame(self, image: np.ndarray, frame_id: int, jpeg_quality: int = 85, raw_rgb: bool = False):
         """
         Broadcast frame to viewers.
 
@@ -332,8 +332,9 @@ class LKASBroker:
             image: Image array (RGB or BGR)
             frame_id: Frame sequence number
             jpeg_quality: JPEG compression quality (0-100)
+            raw_rgb: Send raw RGB instead of JPEG (faster for localhost)
         """
-        self.broadcaster.send_frame(image, frame_id, jpeg_quality)
+        self.broadcaster.send_frame(image, frame_id, jpeg_quality, raw_rgb)
 
     def broadcast_detection(self, detection_data: Dict[str, Any], frame_id: int = None):
         """

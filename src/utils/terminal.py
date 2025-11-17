@@ -44,6 +44,9 @@ class TerminalDisplay:
         # Shared memory status tracking
         self.shm_status = {}  # {name: connected_bool}
 
+        # FPS tracking
+        self.fps_stats = {}  # {name: fps_value}
+
     def print(self, message: str, prefix: str = "", carriage_return: bool = False):
         """
         Print a message to the main content area.
@@ -79,7 +82,7 @@ class TerminalDisplay:
             self.live_display.start()
 
     def _generate_footer_table(self) -> Table:
-        """Generate footer table showing shared memory status."""
+        """Generate footer table showing shared memory status and FPS."""
         table = Table.grid(padding=(0, 2))
         table.add_column(style="cyan", no_wrap=True)
         table.add_column(style="magenta", no_wrap=True)
@@ -94,7 +97,7 @@ class TerminalDisplay:
             )
             status_items.append(f"[bold]{shm_name}:[/bold] {status}")
 
-        # Add to table (up to 3 columns)
+        # Add shared memory status row (up to 3 columns)
         if len(status_items) == 0:
             table.add_row("[dim]No shared memory configured[/dim]")
         elif len(status_items) == 1:
@@ -104,14 +107,28 @@ class TerminalDisplay:
         else:
             table.add_row(status_items[0], status_items[1], status_items[2] if len(status_items) > 2 else "")
 
+        # Add FPS stats on a separate row if available
+        if self.fps_stats:
+            fps_items = []
+            for fps_name, fps_value in sorted(self.fps_stats.items()):
+                fps_items.append(f"[bold]{fps_name}:[/bold] [bold cyan]{fps_value:.1f} FPS[/bold cyan]")
+
+            if len(fps_items) == 1:
+                table.add_row(fps_items[0])
+            elif len(fps_items) == 2:
+                table.add_row(fps_items[0], fps_items[1])
+            else:
+                table.add_row(fps_items[0], fps_items[1], fps_items[2] if len(fps_items) > 2 else "")
+
         return table
 
-    def update_footer(self, shm_status: dict | None = None):
+    def update_footer(self, shm_status: dict | None = None, fps_stats: dict | None = None):
         """
-        Update the persistent footer line with shared memory status.
+        Update the persistent footer line with shared memory status and FPS.
 
         Args:
             shm_status: Dictionary mapping shared memory names to connection status
+            fps_stats: Dictionary mapping stat names to FPS values
         """
 
         if not self.enable_footer:
@@ -121,6 +138,10 @@ class TerminalDisplay:
             # Update shared memory status
             if shm_status is not None:
                 self.shm_status.update(shm_status)
+
+            # Update FPS stats
+            if fps_stats is not None:
+                self.fps_stats.update(fps_stats)
 
             if self.live_display is not None:
                 self.live_display.update(self._generate_footer_table())
