@@ -15,7 +15,7 @@ import sys
 from typing import Optional
 
 from lkas.detection import LaneDetection
-from lkas.detection.core.config import Config
+from skynet_common.config import Config
 from lkas.integration.messages import ImageMessage, DetectionMessage
 from lkas.integration.shared_memory import (
     SharedMemoryImageChannel,
