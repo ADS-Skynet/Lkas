@@ -80,7 +80,7 @@ class DecisionServer:
             kp=config.controller.kp,
             ki=config.controller.ki,
             kd=config.controller.kd,
-            controller_method=config.controller_method,
+            controller_method=config.controller.method,
             throttle_policy={
                 "base": config.throttle_policy.base,
                 "min": config.throttle_policy.min,
@@ -88,8 +88,8 @@ class DecisionServer:
                 "steer_max": config.throttle_policy.steer_max,
             },
         )
-        print(f"✓ Decision controller ready ({config.controller_method.upper()})")
-        if config.controller_method == "pid":
+        print(f"✓ Decision controller ready ({config.controller.method.upper()})")
+        if config.controller.method == "pid":
             print(f"  PID Gains: Kp={config.controller.kp}, Ki={config.controller.ki}, Kd={config.controller.kd}")
         else:
             print(f"  PD Gains: Kp={config.controller.kp}, Kd={config.controller.kd}")

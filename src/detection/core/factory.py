@@ -72,6 +72,7 @@ class DetectorFactory:
                 "hough_max_line_gap", cfg.hough_max_line_gap
             ),
             "smoothing_factor": kwargs.get("smoothing_factor", cfg.smoothing_factor),
+            "config": cfg,  # Pass the full config for ROI and other parameters
         }
 
         return CVLaneDetector(**params)
