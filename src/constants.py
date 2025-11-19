@@ -2,10 +2,8 @@
 LKAS Constants
 
 Lane Keeping Assist System specific constants.
-Only enum-like type identifiers are kept here.
-All configurable values have been moved to config.yaml (common or module-specific).
-
-Use ConfigManager.load() to access configuration values.
+Module-specific configuration values and type identifiers.
+Common configuration values are in skynet_common.config.
 """
 
 
@@ -25,8 +23,15 @@ class ControlModes:
     EMERGENCY_STOP = "emergency_stop"
 
 
+class Launcher:
+    """LKAS launcher configuration."""
+
+    ENABLE_FOOTER = True  # Enable persistent terminal footer display
+
+
 # Convenience exports
 __all__ = [
     'DetectorTypes',
     'ControlModes',
+    'Launcher',
 ]

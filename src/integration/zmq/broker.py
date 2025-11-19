@@ -337,6 +337,7 @@ class LKASBroker:
             jpeg_quality: JPEG compression quality (0-100)
             raw_rgb: Send raw RGB instead of JPEG (faster for localhost)
         """
+        print("[Broker] Broadcasting frame", frame_id)
         self.broadcaster.send_frame(image, frame_id, jpeg_quality, raw_rgb)
 
     def broadcast_detection(self, detection_data: Dict[str, Any], frame_id: int = None):

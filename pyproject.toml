@@ -104,8 +104,7 @@ packages = [
     "lkas.utils",
 ]
 
-[tool.setuptools.package-data]
-"*" = ["*.yaml", "*.yml", "*.json"]
+# No package data needed - using constants.py instead
 
 # Black code formatter configuration
 [tool.black]

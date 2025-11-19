@@ -30,6 +30,7 @@ from typing import List
 
 from lkas.utils.terminal import TerminalDisplay, OrderedLogger
 from skynet_common.config import ConfigManager
+from lkas.constants import Launcher
 import yaml
 
 
@@ -141,7 +142,7 @@ class LKASLauncher:
         )
         self.enable_footer = (
             enable_footer if enable_footer is not None
-            else launcher_config.get('enable_footer', True)
+            else Launcher.ENABLE_FOOTER
         )
 
         # Broadcasting configuration
