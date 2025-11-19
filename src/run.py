@@ -165,6 +165,7 @@ class LKASLauncher:
         # Shared memory channels for broadcasting (only if broadcast enabled)
         self.image_channel = None
         self.detection_channel = None
+        self.control_channel = None
         self.last_broadcast_frame_id = -1
         self.last_broadcast_detection_id = -1
 
@@ -457,6 +458,20 @@ class LKASLauncher:
             except Exception:
                 pass  # Will retry on next call
 
+        # Lazy connection to control channel
+        if self.control_channel is None:
+            try:
+                from lkas.integration.shared_memory import SharedMemoryControlChannel
+                self.control_channel = SharedMemoryControlChannel(
+                    name=self.control_shm_name,
+                    create=False,  # Reader mode
+                    retry_count=1,  # Single attempt
+                    retry_delay=0.0,
+                )
+                self.terminal.print(f"✓ Connected to control channel: {self.control_shm_name}")
+            except Exception:
+                pass  # Will retry on next call
+
         # Try to read and broadcast image
         if self.image_channel:
             try:
@@ -473,13 +488,17 @@ class LKASLauncher:
             except Exception:
                 pass  # Silently ignore read errors
 
-        # Try to read and broadcast detection
+        # Try to read and broadcast detection with metrics from control
         if self.detection_channel:
             try:
                 detection_msg = self.detection_channel.read()  # Non-blocking read
+                control_msg = None
+                if self.control_channel:
+                    control_msg = self.control_channel.read()  # Non-blocking read
+
                 if detection_msg is not None and detection_msg.frame_id != self.last_broadcast_detection_id:
                     # Convert detection message to viewer format (line segments, not arrays)
-                    # Viewer expects DetectionData: {left_lane, right_lane, processing_time_ms, frame_id}
+                    # Viewer expects DetectionData: {left_lane, right_lane, processing_time_ms, frame_id, metrics}
                     # Each lane: {x1, y1, x2, y2, confidence} or None
                     detection_data = {
                         'left_lane': {
@@ -499,12 +518,42 @@ class LKASLauncher:
                         'processing_time_ms': detection_msg.processing_time_ms,
                         'frame_id': detection_msg.frame_id,
                     }
+
+                    # Extract metrics from control message (single source of truth!)
+                    # Metrics are calculated once in controller, not recalculated here
+                    if control_msg is not None:
+                        # Use metrics from control message
+                        detection_data['lateral_offset_meters'] = control_msg.lateral_offset_meters
+                        detection_data['heading_angle_deg'] = control_msg.heading_angle
+                        detection_data['lane_width_pixels'] = control_msg.lane_width_pixels
+                        detection_data['departure_status'] = control_msg.departure_status
+                    else:
+                        # No control data available, use None for all metrics
+                        detection_data['lateral_offset_meters'] = None
+                        detection_data['heading_angle_deg'] = None
+                        detection_data['lane_width_pixels'] = None
+                        detection_data['departure_status'] = None
+
+                        # Warn about missing control data (only at log interval)
+                        if self.verbose and detection_msg.frame_id % self.broadcast_log_interval == 0:
+                            self.terminal.print(f"[Broker] Warning: No control data for frame {detection_msg.frame_id}")
+
                     self.broker.broadcast_detection(detection_data, detection_msg.frame_id)
                     self.last_broadcast_detection_id = detection_msg.frame_id
                     self.broadcast_detection_count += 1
+
                     # Log successful broadcast at configured interval (only in verbose mode)
                     if self.verbose and detection_msg.frame_id % self.broadcast_log_interval == 0:
-                        self.terminal.print(f"[Broker] Detection: frame {detection_msg.frame_id}, L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None}")
+                        has_metrics = control_msg is not None
+                        self.terminal.print(
+                            f"[Broker] Frame {detection_msg.frame_id}: "
+                            f"L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None} | "
+                            f"Metrics: offset={detection_data['lateral_offset_meters']:.3f}m, "
+                            f"status={detection_data['departure_status']}" if has_metrics
+                            else f"[Broker] Frame {detection_msg.frame_id}: "
+                            f"L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None} | "
+                            f"Metrics: N/A"
+                        )
             except Exception as e:
                 # Log errors to help diagnose issues
                 self.terminal.print(f"Warning: Failed to broadcast detection: {e}")
@@ -531,7 +580,12 @@ class LKASLauncher:
         self._print_header()
 
         # Open log file
-        self.log_file = open(self.log_file_path, "w", buffering=1)
+        if self.log_file_path:
+            self.log_file = open(self.log_file_path, "w", buffering=1)
+            print(f"✓ Logging to: {self.log_file_path}")
+        else:
+            self.log_file = None
+            print("⚠ No log file configured")
 
         # Setup ZMQ broker if enabled
         self._setup_broker()

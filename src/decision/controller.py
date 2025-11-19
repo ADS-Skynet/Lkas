@@ -160,14 +160,17 @@ class DecisionController:
                 throttle = self.default_throttle
             brake = self.default_brake
 
-        # Create control message
+        # Create control message with complete metrics
         control = ControlMessage(
             steering=steering,
             throttle=throttle,
             brake=brake,
             mode=self.mode,
             lateral_offset=metrics.lateral_offset_normalized,
+            lateral_offset_meters=metrics.lateral_offset_meters,
             heading_angle=metrics.heading_angle_deg,
+            lane_width_pixels=metrics.lane_width_pixels,
+            departure_status=metrics.departure_status.value if metrics.departure_status else None,
         )
 
         # Ensure values are clamped
