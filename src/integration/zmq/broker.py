@@ -307,11 +307,10 @@ class LKASBroker:
             paused = data.get('paused', False)
             steering = data.get('steering', 0.0)
             speed_kmh = data.get('speed_kmh', 0.0)
+            throttle = data.get('throttle', 0.0)
 
-            if self.vehicle_status_count == 1:
-                print(f"[Broker] First vehicle status received: paused={paused}, steering={steering:.3f}")
-            elif self.verbose and self.vehicle_status_count % 50 == 0:  # Every 50 messages
-                print(f"[Broker] Vehicle status #{self.vehicle_status_count}: paused={paused}, steering={steering:.3f}, speed={speed_kmh:.1f}km/h")
+            if self.verbose and self.vehicle_status_count % 50 == 0:  # Every 50 messages
+                print(f"[Broker] Vehicle status #{self.vehicle_status_count}: paused={paused}, steering={steering:.3f}, speed={speed_kmh:.1f}km/h, throttle={throttle:.3f}")
 
             return True
 
