@@ -88,14 +88,25 @@ class LKASLauncher:
         self.method = method
         self.config = config
         self.gpu = gpu
-        self.image_shm_name = image_shm_name
-        self.detection_shm_name = detection_shm_name
-        self.control_shm_name = control_shm_name
         self.verbose = verbose
         self.broadcast = broadcast
 
         # Load config for shared memory setup
         self.system_config = ConfigManager.load(self.config)
+
+        # Use config values if SHM names not specified via command-line
+        self.image_shm_name = (
+            image_shm_name if image_shm_name is not None
+            else self.system_config.communication.image_shm_name
+        )
+        self.detection_shm_name = (
+            detection_shm_name if detection_shm_name is not None
+            else self.system_config.communication.detection_shm_name
+        )
+        self.control_shm_name = (
+            control_shm_name if control_shm_name is not None
+            else self.system_config.communication.control_shm_name
+        )
 
         # Load launcher config from yaml (if config path provided)
         launcher_config = {}
@@ -173,10 +184,6 @@ class LKASLauncher:
         self.running = False
         self.broker = None
 
-        # Subprocess log file handles
-        self.detection_log_file = None
-        self.decision_log_file = None
-
         # Shared memory channels for broadcasting (only if broadcast enabled)
         self.image_channel = None
         self.detection_channel = None
@@ -206,6 +213,8 @@ class LKASLauncher:
 
         # Initialization phase tracking
         self.buffering_mode = True
+        self.decision_initialized = False
+        self.detection_initialized = False
 
         # Progress line tracking (for suppressing intermediate updates)
         self.last_progress_line = {"DETECTION": None, "DECISION ": None}
@@ -319,12 +328,19 @@ class LKASLauncher:
                         # Track shared memory connections from subprocess output
                         self._check_shm_connection(stripped)
 
-                        # Always print to terminal (Rich handles the display)
-                        logger.print_immediate(stripped, line.endswith('\r'))
+                        # Check for initialization completion markers
+                        if "Decision Server Running" in stripped:
+                            self.decision_initialized = True
+                        elif "Detection Server Running" in stripped:
+                            self.detection_initialized = True
 
-                        # Log to file
-                        if hasattr(self, 'log_file') and self.log_file:
-                            self.log_file.write(f"[{prefix}] {stripped}\n")
+                        # Print to terminal (buffer during init for ordering, immediate during runtime)
+                        if self.buffering_mode:
+                            # Buffer messages during initialization for ordered output
+                            logger.log(stripped)
+                        else:
+                            # Print immediately during runtime
+                            logger.print_immediate(stripped, line.endswith('\r'))
             except BlockingIOError:
                 # No data available - this is OK for non-blocking I/O
                 pass
@@ -347,12 +363,19 @@ class LKASLauncher:
                         # Track shared memory connections from subprocess output
                         self._check_shm_connection(stripped)
 
-                        # Always print to terminal (Rich handles the display)
-                        logger.print_immediate(stripped, line.endswith('\r'))
+                        # Check for initialization completion markers
+                        if "Decision Server Running" in stripped:
+                            self.decision_initialized = True
+                        elif "Detection Server Running" in stripped:
+                            self.detection_initialized = True
 
-                        # Log to file
-                        if hasattr(self, 'log_file') and self.log_file:
-                            self.log_file.write(f"[{prefix}] {stripped}\n")
+                        # Print to terminal (buffer during init for ordering, immediate during runtime)
+                        if self.buffering_mode:
+                            # Buffer messages during initialization for ordered output
+                            logger.log(stripped)
+                        else:
+                            # Print immediately during runtime
+                            logger.print_immediate(stripped, line.endswith('\r'))
             except Exception:
                 pass
 
@@ -627,14 +650,11 @@ class LKASLauncher:
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
 
-            # Open dedicated log file for decision server
-            decision_log_path = self.log_file_path.replace('.log', '_decision.log') if self.log_file_path else None
-            self.decision_log_file = open(decision_log_path, 'w', buffering=1) if decision_log_path else None
-
+            # Redirect stderr to main log file for error capture
             self.decision_process = subprocess.Popen(
                 decision_cmd,
                 stdout=subprocess.PIPE,
-                stderr=self.decision_log_file if self.decision_log_file else subprocess.STDOUT,  # Redirect stderr to log file
+                stderr=self.log_file if self.log_file else subprocess.STDOUT,  # Redirect stderr to main log file
                 bufsize=0,  # Unbuffered
                 env=env,
             )
@@ -643,43 +663,22 @@ class LKASLauncher:
                 flags = fcntl.fcntl(self.decision_process.stdout, fcntl.F_GETFL)
                 fcntl.fcntl(self.decision_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
             self.terminal.print(f"✓ Decision server started (PID: {self.decision_process.pid})")
-            if decision_log_path:
-                self.terminal.print(f"  Decision logs: {decision_log_path}")
 
-            # Read decision initialization messages (buffered for ordering)
-            # Buffer to capture the initial setup messages
-            init_timeout = time.time() + self.decision_init_timeout
-            while time.time() < init_timeout:
-                self._read_process_output(self.decision_process, "DECISION ", self.decision_logger)
-                time.sleep(0.01)
+            # Small delay to let decision server start
+            time.sleep(0.1)
 
-            # Flush decision initialization
-            self.decision_logger.flush()
-
-            # Check if decision server is still running
-            if self.decision_process.poll() is not None:
-                self.terminal.print("✗ Decision server failed to start!")
-                self.stop()
-                return 1
-
-            # Small delay before starting detection server
-            time.sleep(self.system_config.timing.post_decision_delay_s)
-
-            # Start detection server AFTER decision is ready
+            # Start detection server in parallel (don't wait for decision to finish)
             self.terminal.print("\nStarting detection server...")
             detection_cmd = self._build_detection_cmd()
             # Set PYTHONUNBUFFERED to ensure output is not buffered
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
 
-            # Open dedicated log file for detection server
-            detection_log_path = self.log_file_path.replace('.log', '_detection.log') if self.log_file_path else None
-            self.detection_log_file = open(detection_log_path, 'w', buffering=1) if detection_log_path else None
-
+            # Redirect stderr to main log file for error capture
             self.detection_process = subprocess.Popen(
                 detection_cmd,
                 stdout=subprocess.PIPE,
-                stderr=self.detection_log_file if self.detection_log_file else subprocess.STDOUT,  # Redirect stderr to log file
+                stderr=self.log_file if self.log_file else subprocess.STDOUT,  # Redirect stderr to main log file
                 bufsize=0,  # Unbuffered
                 env=env,
             )
@@ -688,26 +687,39 @@ class LKASLauncher:
                 flags = fcntl.fcntl(self.detection_process.stdout, fcntl.F_GETFL)
                 fcntl.fcntl(self.detection_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
             self.terminal.print(f"✓ Detection server started (PID: {self.detection_process.pid})")
-            if detection_log_path:
-                self.terminal.print(f"  Detection logs: {detection_log_path}")
+            self.terminal.print("")
 
-            # Read detection initialization messages (buffered for ordering)
-            # Buffer to capture the initial setup messages
-            init_timeout = time.time() + self.detection_init_timeout
-            while time.time() < init_timeout:
+            # Disable buffering - print messages immediately for real-time feedback
+            self.buffering_mode = False
+
+            # Wait for both servers to signal initialization complete
+            # Print messages in real-time while waiting for completion markers
+            max_wait_time = 60.0  # Maximum 60 seconds as failsafe
+            start_time = time.time()
+            while not (self.decision_initialized and self.detection_initialized):
+                # Read and print messages immediately from both processes
                 self._read_process_output(self.detection_process, "DETECTION", self.detection_logger)
+                self._read_process_output(self.decision_process, "DECISION ", self.decision_logger)
+
+                # Check if processes are still alive
+                if self.detection_process.poll() is not None:
+                    self.terminal.print("✗ Detection server died during initialization!")
+                    return 1
+                if self.decision_process.poll() is not None:
+                    self.terminal.print("✗ Decision server died during initialization!")
+                    return 1
+
+                # Timeout failsafe
+                if time.time() - start_time > max_wait_time:
+                    self.terminal.print("✗ Timeout waiting for server initialization!")
+                    self.terminal.print(f"  Decision ready: {self.decision_initialized}")
+                    self.terminal.print(f"  Detection ready: {self.detection_initialized}")
+                    return 1
+
                 time.sleep(0.01)
 
-            # Flush detection initialization
-            self.detection_logger.flush()
-
-            # Check if detection server is still running
-            if self.detection_process.poll() is not None:
-                self.terminal.print("✗ Detection server failed to start!")
-                return 1
-
-            # Exit buffering mode - from now on, print messages immediately
-            self.buffering_mode = False
+            # Both servers are fully initialized
+            self.terminal.print("")
 
             # Setup shared memory readers for broadcasting (after servers are ready)
             self._setup_shared_memory_readers()
@@ -778,17 +790,6 @@ class LKASLauncher:
             self.terminal.clear_footer()
             if hasattr(self, 'log_file') and self.log_file:
                 self.log_file.close()
-            # Close subprocess log files
-            if self.detection_log_file:
-                try:
-                    self.detection_log_file.close()
-                except Exception:
-                    pass
-            if self.decision_log_file:
-                try:
-                    self.decision_log_file.close()
-                except Exception:
-                    pass
             self.stop()
 
         return 0
@@ -832,13 +833,6 @@ class LKASLauncher:
                 self.decision_process.kill()
                 self.decision_process.wait()
 
-        # Close decision log file
-        if self.decision_log_file:
-            try:
-                self.decision_log_file.close()
-            except Exception:
-                pass
-
         # Then stop detection server (producer)
         if self.detection_process and self.detection_process.poll() is None:
             self.terminal.print("Stopping detection server...")
@@ -850,13 +844,6 @@ class LKASLauncher:
                 self.terminal.print("! Detection server not responding, killing...")
                 self.detection_process.kill()
                 self.detection_process.wait()
-
-        # Close detection log file
-        if self.detection_log_file:
-            try:
-                self.detection_log_file.close()
-            except Exception:
-                pass
 
         self.terminal.print("✓ Cleanup complete")
 
@@ -891,20 +878,20 @@ def main():
     parser.add_argument(
         "--image-shm-name",
         type=str,
-        default="camera_feed",
-        help="Shared memory name for camera images (default: camera_feed)",
+        default=None,
+        help="Shared memory name for camera images (default: from config)",
     )
     parser.add_argument(
         "--detection-shm-name",
         type=str,
-        default="detection_results",
-        help="Shared memory name for detection results (default: detection_results)",
+        default=None,
+        help="Shared memory name for detection results (default: from config)",
     )
     parser.add_argument(
         "--control-shm-name",
         type=str,
-        default="control_commands",
-        help="Shared memory name for control commands (default: control_commands)",
+        default=None,
+        help="Shared memory name for control commands (default: from config)",
     )
     parser.add_argument(
         "--verbose",
