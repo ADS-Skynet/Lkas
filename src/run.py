@@ -201,8 +201,12 @@ class LKASLauncher:
         # Terminal display with persistent footer
         subprocess_prefix = self.system_config.launcher.subprocess_prefix
         self.terminal = TerminalDisplay(enable_footer=self.enable_footer)
-        self.detection_logger = OrderedLogger(subprocess_prefix, self.terminal)
-        self.decision_logger = OrderedLogger(subprocess_prefix, self.terminal)
+        # self.detection_logger = OrderedLogger(subprocess_prefix, self.terminal)
+        # self.decision_logger = OrderedLogger(subprocess_prefix, self.terminal)
+
+        self.detection_logger = OrderedLogger("[Detection]", self.terminal)
+        self.decision_logger = OrderedLogger("[Decision]", self.terminal)
+
 
         # Shared memory status tracking for footer
         self.shm_status = {
@@ -291,14 +295,13 @@ class LKASLauncher:
         self.terminal.print(separator)
         self.terminal.print("")
 
-    def _read_process_output(self, process: subprocess.Popen, prefix: str, logger: OrderedLogger):
+    def _read_process_output(self, process: subprocess.Popen, logger: OrderedLogger):
         """
         Read and print process output with prefix.
         Non-blocking read using select.
 
         Args:
             process: Process to read from
-            prefix: Prefix for messages
             logger: Logger to use for output
         """
         if process.stdout is None:
@@ -316,8 +319,8 @@ class LKASLauncher:
                 data = process.stdout.read(self.system_config.launcher.buffer_read_size)
                 if data:
                     lines_raw = data.decode('utf-8')
-                    lines = lines_raw.splitlines(keepends=True)
-                    # for line in lines_raw.splitlines(keepends=True):
+                    lines = lines_raw.splitlines(keepends=False)
+                    # for line in lines_raw.splitlines(keepends=False):
                     #     print(repr(line))
 
                     for line in lines:
@@ -329,9 +332,9 @@ class LKASLauncher:
                         self._check_shm_connection(stripped)
 
                         # Check for initialization completion markers
-                        if "Decision Server Running" in stripped:
+                        if "Decision Server Started" in stripped:
                             self.decision_initialized = True
-                        elif "Detection Server Running" in stripped:
+                        elif "Detection Server Started" in stripped:
                             self.detection_initialized = True
 
                         # Print to terminal (buffer during init for ordering, immediate during runtime)
@@ -340,7 +343,8 @@ class LKASLauncher:
                             logger.log(stripped)
                         else:
                             # Print immediately during runtime
-                            logger.print_immediate(stripped, line.endswith('\r'))
+                            logger.print_immediate(stripped)
+
             except BlockingIOError:
                 # No data available - this is OK for non-blocking I/O
                 pass
@@ -619,7 +623,7 @@ class LKASLauncher:
         # Open log file
         if self.log_file_path:
             self.log_file = open(self.log_file_path, "w", buffering=1)
-            print(f"✓ Logging to: {self.log_file_path}")
+            print(f"✓ Logging to: {self.log_file_path}\n")
         else:
             self.log_file = None
             print("⚠ No log file configured")
@@ -644,7 +648,7 @@ class LKASLauncher:
 
         try:
             # Start decision server FIRST (so it's ready when detection starts)
-            self.terminal.print("Starting decision server...")
+            self.terminal.print("Detaching decision server...")
             decision_cmd = self._build_decision_cmd()
             # Set PYTHONUNBUFFERED to ensure output is not buffered
             env = os.environ.copy()
@@ -662,13 +666,13 @@ class LKASLauncher:
             if self.decision_process.stdout:
                 flags = fcntl.fcntl(self.decision_process.stdout, fcntl.F_GETFL)
                 fcntl.fcntl(self.decision_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-            self.terminal.print(f"✓ Decision server started (PID: {self.decision_process.pid})")
+            self.terminal.print(f"✓ Decision server detached (PID: {self.decision_process.pid})")
 
             # Small delay to let decision server start
-            time.sleep(0.1)
+            time.sleep(1)
 
             # Start detection server in parallel (don't wait for decision to finish)
-            self.terminal.print("\nStarting detection server...")
+            self.terminal.print("\nDetaching detection server...")
             detection_cmd = self._build_detection_cmd()
             # Set PYTHONUNBUFFERED to ensure output is not buffered
             env = os.environ.copy()
@@ -686,40 +690,56 @@ class LKASLauncher:
             if self.detection_process.stdout:
                 flags = fcntl.fcntl(self.detection_process.stdout, fcntl.F_GETFL)
                 fcntl.fcntl(self.detection_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-            self.terminal.print(f"✓ Detection server started (PID: {self.detection_process.pid})")
-            self.terminal.print("")
+            self.terminal.print(f"✓ Detection server detached (PID: {self.detection_process.pid})\n")
 
-            # Disable buffering - print messages immediately for real-time feedback
-            self.buffering_mode = False
-
-            # Wait for both servers to signal initialization complete
-            # Print messages in real-time while waiting for completion markers
+            # Use micro-buffering during initialization for real-time output with context preservation
+            # Buffer messages briefly, then flush periodically to keep contexts together
             max_wait_time = 60.0  # Maximum 60 seconds as failsafe
             start_time = time.time()
-            while not (self.decision_initialized and self.detection_initialized):
-                # Read and print messages immediately from both processes
-                self._read_process_output(self.detection_process, "DETECTION", self.detection_logger)
-                self._read_process_output(self.decision_process, "DECISION ", self.decision_logger)
+            changed_context = "init"
+
+            while not (self.detection_initialized and self.decision_initialized):
+                # Buffer messages from both processes
+                self._read_process_output(self.detection_process, self.detection_logger)
+                self._read_process_output(self.decision_process, self.decision_logger)
+
+                if self.decision_logger.buffer:
+                    if changed_context == "det":
+                        self.terminal.print("")
+                    self.decision_logger.flush()
+                    changed_context = "dec"
+                elif self.detection_logger.buffer:
+                    if changed_context == "dec":
+                        self.terminal.print("")
+                    self.detection_logger.flush()
+                    changed_context = "det"
 
                 # Check if processes are still alive
                 if self.detection_process.poll() is not None:
+                    # Flush remaining buffers before reporting error
                     self.terminal.print("✗ Detection server died during initialization!")
                     return 1
                 if self.decision_process.poll() is not None:
+                    # Flush remaining buffers before reporting error
                     self.terminal.print("✗ Decision server died during initialization!")
                     return 1
 
                 # Timeout failsafe
                 if time.time() - start_time > max_wait_time:
+                    # Flush remaining buffers before reporting error
                     self.terminal.print("✗ Timeout waiting for server initialization!")
                     self.terminal.print(f"  Decision ready: {self.decision_initialized}")
                     self.terminal.print(f"  Detection ready: {self.detection_initialized}")
                     return 1
 
-                time.sleep(0.01)
+                time.sleep(0.1)
 
-            # Both servers are fully initialized
-            self.terminal.print("")
+            # Final flush of any remaining buffered messages
+            self.decision_logger.flush()
+            self.detection_logger.flush()
+
+            # Now disable buffering for real-time runtime messages
+            self.buffering_mode = False
 
             # Setup shared memory readers for broadcasting (after servers are ready)
             self._setup_shared_memory_readers()
@@ -752,8 +772,8 @@ class LKASLauncher:
                     self._broadcast_data()
 
                 # Read output from both processes (use print_immediate for runtime)
-                self._read_process_output(self.detection_process, "DETECTION", self.detection_logger)
-                self._read_process_output(self.decision_process, "DECISION ", self.decision_logger)
+                self._read_process_output(self.detection_process, self.detection_logger)
+                self._read_process_output(self.decision_process, self.decision_logger)
 
                 # Then check if processes are still alive
                 detection_alive = self.detection_process.poll() is None
@@ -761,8 +781,6 @@ class LKASLauncher:
 
                 if not detection_alive:
                     # Try to read remaining output
-                    for _ in range(10):
-                        self._read_process_output(self.detection_process, "DETECTION", self.detection_logger)
                     self.terminal.clear_footer()
                     self.terminal.print("✗ Detection server died unexpectedly!")
                     self.running = False
@@ -771,10 +789,6 @@ class LKASLauncher:
                 if not decision_alive:
                     # Try to read remaining output before reporting death
                     self.terminal.clear_footer()
-                    self.terminal.print("Decision server process ended, reading final output...")
-                    time.sleep(0.1)  # Give output a moment to flush
-                    for _ in range(20):
-                        self._read_process_output(self.decision_process, "DECISION ", self.decision_logger)
                     self.terminal.print("✗ Decision server died unexpectedly!")
                     self.running = False
                     break

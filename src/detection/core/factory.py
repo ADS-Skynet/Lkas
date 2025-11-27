@@ -89,7 +89,7 @@ class DetectorFactory:
             "input_size": kwargs.get("input_size", cfg.input_size),
             "threshold": kwargs.get("threshold", cfg.threshold),
             "device": kwargs.get("device", cfg.device),
-            "model_path": kwargs.get("model_path", None),
+            "model_path": kwargs.get("model_path", cfg.model_path),
         }
 
         return DLLaneDetector(**params)

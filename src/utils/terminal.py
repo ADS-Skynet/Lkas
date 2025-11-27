@@ -57,14 +57,8 @@ class TerminalDisplay:
         """
         # Just use regular print - Rich Live handles the footer
         if prefix:
-            # if carriage_return:
-            #     print(f"\r{prefix} {message}", end="", flush=True)
-            # else:
             print(f"{prefix} {message}")
         else:
-            # if carriage_return:
-            #     print(f"\r{message}", end="", flush=True)
-            # else:
             print(message)
 
     def init_footer(self):

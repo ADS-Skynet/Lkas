@@ -132,10 +132,6 @@ class DecisionServer:
             self.param_client.register_callback(self._on_parameter_update)
             print(f"✓ Parameter updates enabled")
 
-        print("\n" + "=" * 60)
-        print("Server initialized successfully!")
-        print("=" * 60)
-
     def _on_parameter_update(self, param_name: str, value: float):
         """
         Handle real-time parameter update.
@@ -167,12 +163,8 @@ class DecisionServer:
         signal.signal(signal.SIGTERM, signal_handler)
 
         print("\n" + "=" * 60)
-        print("Decision Server Running")
+        print("Decision Server Started")
         print("=" * 60)
-        print(f"Reading detections from: detection_results")
-        print(f"Writing controls to: control_commands")
-        print("Press Ctrl+C to stop")
-        print("=" * 60 + "\n")
 
         self.running = True
 
@@ -288,8 +280,8 @@ def main():
     # Create and run server
     server = DecisionServer(
         config=config,
-        detection_shm_name=comm.detection_shm_name,
-        control_shm_name=comm.control_shm_name,
+        detection_shm_name=config.communication.detection_shm_name,
+        control_shm_name=config.communication.control_shm_name,
         retry_count=args.retry_count,
         retry_delay=args.retry_delay,
     )

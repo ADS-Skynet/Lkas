@@ -117,9 +117,9 @@ class DetectionServer:
                 self.param_client.register_callback(self._on_parameter_update)
                 print(f"✓ Parameter updates enabled")
 
-            print("\n" + "=" * 60)
-            print("Server initialized successfully!")
-            print("=" * 60)
+            # print("\n" + "=" * 60)
+            # print("Server initialized successfully!")
+            # print("=" * 60)
 
         except Exception as e:
             # Cleanup on initialization failure
@@ -198,12 +198,8 @@ class DetectionServer:
         signal.signal(signal.SIGTERM, signal_handler)
 
         print("\n" + "=" * 60)
-        print("Detection Server Running")
+        print("Detection Server Started")
         print("=" * 60)
-        print(f"Reading images from: {self.image_channel.name}")
-        print(f"Writing detections to: {self.detection_channel.name}")
-        print("Press Ctrl+C to stop")
-        print("=" * 60 + "\n")
 
         self.running = True
 

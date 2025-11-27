@@ -382,26 +382,31 @@ class DLLaneDetector:
         return tensor.to(self.device)
 
     def postprocess(self, output: torch.Tensor, original_size: Tuple[int, int]) -> np.ndarray:
-        """
-        Postprocess model output to binary mask.
-
-        Args:
-            output: Model output tensor
-            original_size: Original image size (height, width)
-
-        Returns:
-            Binary lane mask
-        """
-        # Remove batch dimension and convert to numpy
+        # Remove batch dimension and convert to NumPy
         mask = output.squeeze().cpu().detach().numpy()
 
-        # Apply threshold
-        binary_mask = (mask > self.threshold).astype(np.uint8) * 255
+        # Apply threshold to obtain raw binary segmentation
+        binary_mask = (mask > self.threshold).astype(np.uint8)
 
-        # Resize to original size
+        kernel = np.ones((5, 5), np.uint8)
+
+        # Remove small noise
+        binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        # Connect broken segments
+        binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+        # Slightly thicken lines
+        binary_mask = cv2.dilate(binary_mask, kernel, iterations=1)
+
+        # Convert 0/1 mask → 0/255
+        binary_mask = binary_mask * 255
+
+        # Resize back to original resolution
         resized_mask = cv2.resize(binary_mask, (original_size[1], original_size[0]))
 
         return resized_mask
+
 
     def detect(self, image: np.ndarray) -> Tuple[Tuple | None, Tuple | None, np.ndarray]:
         """

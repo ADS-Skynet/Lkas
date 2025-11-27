@@ -164,3 +164,10 @@ warn_no_return = true
 [[tool.mypy.overrides]]
 module = ["carla.*", "cv2.*", "pygame.*", "flask.*"]
 ignore_missing_imports = true
+
+# pyright/pylance type checker configuration
+[tool.pyright]
+include = ["src"]
+extraPaths = ["src"]
+pythonVersion = "3.10"
+pythonPlatform = "Linux"
