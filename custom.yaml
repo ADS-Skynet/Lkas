@@ -80,11 +80,12 @@ cv_detector:
 
 # Deep Learning Detector
 dl_detector:
-  model_type: "pretrained"  # Keep using pretrained UNet architecture
-  model_path: "Tilak1812/lane-detection-unet-tusimple"  # HF Hub model ID
-  input_size: [256, 256]
+  framework: "tflite"  # Using TFLite for performance
+  model_type: "pretrained"
+  model_path: "unet_model/cluster_quantized_activations.tflite"  # 6MB quantized model
+  input_size: [640, 384]  # TFLite model input size
   threshold: 0.5
-  device: "auto"  # 'cpu', 'cuda', or 'auto'
+  device: "auto"
 
 # Lane Analyzer
 lane_analyzer:
@@ -134,7 +135,7 @@ visualization:
 retry:
   max_retries: 20                 # Standard retry count
   retry_delay_s: 0.5              # Standard retry delay (seconds)
-  extended_max_retries: 30        # For shared memory initialization
+  extended_max_retries: 120       # For shared memory initialization (increased for DL model loading)
   extended_retry_delay_s: 1.0     # Extended retry delay (seconds)
 
 # System Timing
@@ -156,7 +157,7 @@ streaming:
 # Process Launcher
 launcher:
   decision_init_timeout_s: 3.0    # Decision process init timeout
-  detection_init_timeout_s: 4.0   # Detection process init timeout
+  detection_init_timeout_s: 120.0 # Detection process init timeout (increased for model download)
   process_stop_timeout_s: 5.0     # Process termination timeout
   terminal_width: 70              # Terminal output width
   subprocess_prefix: "[SubProc]"  # Subprocess log prefix

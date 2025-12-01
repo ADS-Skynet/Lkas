@@ -298,9 +298,10 @@ class DLLaneDetector:
 
                     # Download the model file from HF Hub
                     # Try common naming conventions
-                    filenames = ["pytorch_model.bin", "model.pth", "best_model.pth", "lane_model.pth"]
+                    filenames = ["pytorch_model.bin", "model.pth", "best_model.pth", "lane_model.pth", "best_model.keras"]
                     print(f"   Trying filenames: {', '.join(filenames)}", flush=True)
 
+                    found_file = None
                     for filename in filenames:
                         try:
                             print(f"   → Trying {filename}...", end=" ", flush=True)
@@ -310,6 +311,7 @@ class DLLaneDetector:
                                 cache_dir=".cache/huggingface"
                             )
                             model_path = local_path
+                            found_file = filename
                             print(f"✓ Found!", flush=True)
                             print(f"✓ Downloaded to: {local_path}", flush=True)
                             break
@@ -322,6 +324,20 @@ class DLLaneDetector:
                         print(f"   Tried: {', '.join(filenames)}", file=sys.stderr, flush=True)
                         print(f"   Check the repo at: https://huggingface.co/{hf_model_id}", file=sys.stderr, flush=True)
                         raise FileNotFoundError(f"No model file found in {hf_model_id}")
+
+                    # Check if it's a Keras model
+                    if found_file and found_file.endswith('.keras'):
+                        print("=" * 60, flush=True)
+                        print("⚠️  WARNING: Found Keras model (.keras file)!", file=sys.stderr, flush=True)
+                        print("   This codebase uses PyTorch, not TensorFlow/Keras!", file=sys.stderr, flush=True)
+                        print("   You need to convert the model to PyTorch format.", file=sys.stderr, flush=True)
+                        print("", file=sys.stderr, flush=True)
+                        print("   📖 See: scripts/HUGGINGFACE_SETUP.md for conversion guide", file=sys.stderr, flush=True)
+                        print("   🔧 Run: python scripts/convert_keras_to_pytorch.py \\", file=sys.stderr, flush=True)
+                        print(f"           --repo {hf_model_id} \\", file=sys.stderr, flush=True)
+                        print("           --upload YOUR_USERNAME/lane-detection-unet-tusimple", file=sys.stderr, flush=True)
+                        print("=" * 60, flush=True)
+                        raise ValueError(f"Cannot load Keras model. Please convert to PyTorch format first.")
 
                 except ImportError:
                     # Error: write to stderr for log file

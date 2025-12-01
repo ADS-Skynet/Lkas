@@ -140,7 +140,7 @@ class LKASBroker:
 
         print("=" * 60)
         print("Broker ready to route and broadcast")
-        print("=" * 60 + "\n")
+        print("=" * 60)
 
     # =========================================================================
     # Parameter Routing

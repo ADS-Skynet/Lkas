@@ -427,7 +427,7 @@ class LKASLauncher:
         try:
             from lkas.integration.zmq import LKASBroker
 
-            self.terminal.print("\nInitializing ZMQ broker (routing & broadcasting)...")
+            self.terminal.print("Initializing ZMQ broker (routing & broadcasting)...")
             self.broker = LKASBroker(verbose=self.verbose)
             self.terminal.print("")
         except Exception as e:
