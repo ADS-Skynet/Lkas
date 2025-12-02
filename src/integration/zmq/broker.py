@@ -380,7 +380,7 @@ class LKASBroker:
 
     def close(self):
         """Close broker and cleanup resources."""
-        print("\n[Broker] Shutting down...")
+        print("\nStopping broker server...")
 
         # Close broadcaster
         if self.broadcaster:
@@ -402,7 +402,7 @@ class LKASBroker:
         if self.owns_context and self.context:
             self.context.term()
 
-        print("[Broker] Shutdown complete")
+        print("✓ Broker server stopped")
 
     def get_stats(self) -> Dict[str, int]:
         """Get broker statistics."""

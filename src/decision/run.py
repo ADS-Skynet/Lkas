@@ -120,16 +120,16 @@ class DecisionServer:
         self.last_print_time = time.time()
 
         # Setup parameter updates if enabled
-        self.param_client = None
+        self.param_sub = None
         if enable_parameter_updates:
-            from lkas.integration.zmq import ParameterClient
+            from skynet_common.communication import ParameterSubscriber
 
             print(f"\nSetting up real-time parameter updates...")
-            self.param_client = ParameterClient(
+            self.param_sub = ParameterSubscriber(
                 category='decision',
                 broker_url=parameter_broker_url
             )
-            self.param_client.register_callback(self._on_parameter_update)
+            self.param_sub.register_callback(self._on_parameter_update)
             print(f"✓ Parameter updates enabled")
 
     def _on_parameter_update(self, param_name: str, value: float):
@@ -140,11 +140,7 @@ class DecisionServer:
             param_name: Parameter name
             value: New value
         """
-        success = self.controller.update_parameter(param_name, value)
-        if success:
-            print(f"[Decision] Parameter updated: {param_name} = {value}")
-        else:
-            print(f"[Decision] Failed to update parameter: {param_name}")
+        self.controller.update_parameter(param_name, value)
 
     def run(self, print_stats: bool = True):
         """Start serving decision requests.
@@ -172,8 +168,8 @@ class DecisionServer:
             while self.running:
                 try:
                     # Poll for parameter updates (non-blocking)
-                    if self.param_client:
-                        self.param_client.poll()
+                    if self.param_sub:
+                        self.param_sub.poll()
 
                     # Read detection from shared memory (non-blocking)
                     detection = self.detection_channel.read()
@@ -227,8 +223,8 @@ class DecisionServer:
         self.running = False
 
         # Close parameter client
-        if self.param_client:
-            self.param_client.close()
+        if self.param_sub:
+            self.param_sub.close()
 
         self.detection_channel.close()
         self.control_channel.close()

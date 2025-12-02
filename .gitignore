@@ -65,6 +65,7 @@ Thumbs.db
 .devcontainer/
 .vscode/
 .temp/
+*.yaml
 
 # Hugging Face
 .cache/

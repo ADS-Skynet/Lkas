@@ -234,6 +234,11 @@ class CVLaneDetector(LaneDetector):
         Returns:
             True if parameter was updated successfully, False otherwise
         """
+        # Handle special 'reset' parameter
+        if param_name == 'reset':
+            self.reset_smoothing()
+            return True
+
         # Map of valid parameters and their value constraints
         valid_params = {
             'canny_low': (1, 255),
@@ -288,7 +293,6 @@ class CVLaneDetector(LaneDetector):
             self.roi_top_y = float(value)
             self._recalculate_roi()
 
-        print(f"✓ Updated {param_name} = {value}")
         return True
 
     def _recalculate_roi(self):
