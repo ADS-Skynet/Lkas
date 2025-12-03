@@ -188,6 +188,24 @@ class PIDController:
         """
         return (self.kp, self.ki, self.kd)
 
+    def reset_state(self):
+        """
+        Reset PID error accumulation and derivative state.
+
+        Used when:
+            - Resetting the system
+            - Starting a new driving session
+            - After significant disturbance
+
+        Resets:
+            - integral: Error accumulation to 0
+            - prev_error: Previous error to 0
+            - prev_time: Time tracking to current time
+        """
+        self.integral = 0.0
+        self.prev_error = 0.0
+        self.prev_time = time.time()
+
 
 # =============================================================================
 # PID CONTROL EXPLANATION (for those new to control theory)

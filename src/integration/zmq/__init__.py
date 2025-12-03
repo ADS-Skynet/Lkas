@@ -8,22 +8,28 @@ Public API:
         - LKASBroker: Main broker that manages all ZMQ communication
 
     Client-side (used by detection/decision servers):
-        - ParameterClient: Subscribe to parameter updates
+        - ParameterClient: DEPRECATED - Use skynet_common.communication.ParameterSubscriber
 
     Messages:
         - VehicleState: Vehicle state message
         - ParameterUpdate: Parameter update message
         - ActionRequest: Action request message
+
+DEPRECATION NOTICE:
+    ParameterClient has been renamed to ParameterSubscriber and moved to
+    skynet_common.communication for consistent naming (pairs with ParameterPublisher).
+
+    Please update your imports:
+        Old: from lkas.integration.zmq import ParameterClient
+        New: from skynet_common.communication import ParameterSubscriber
 """
 
 from .broker import LKASBroker, create_broker_from_config
-from .client import ParameterClient
 from .messages import VehicleState, ParameterUpdate, ActionRequest
 
 __all__ = [
     "LKASBroker",
     "create_broker_from_config",
-    "ParameterClient",
     "VehicleState",
     "ParameterUpdate",
     "ActionRequest",

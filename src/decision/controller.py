@@ -220,6 +220,23 @@ class DecisionController:
         """Get lane analyzer instance."""
         return self.analyzer
 
+    def reset_state(self):
+        """
+        Reset controller state (PID error accumulation and derivative).
+
+        Used when:
+            - User presses reset button
+            - Starting a new session
+            - After significant disturbance
+
+        Only affects PID controller (PD controller has no state to reset).
+        """
+        if self.controller_method == "pid":
+            self.controller.reset_state()
+            # print("✓ PID controller state reset (integral and derivative cleared)")
+        # else:
+            # print("ℹ PD controller has no state to reset")
+
     def update_parameter(self, param_name: str, value: float) -> bool:
         """
         Update a decision parameter in real-time.
@@ -231,6 +248,11 @@ class DecisionController:
         Returns:
             True if parameter was updated successfully, False otherwise
         """
+        # Handle special 'reset' parameter
+        if param_name == 'reset':
+            self.reset_state()
+            return True
+
         # Map of valid parameters and their value constraints
         valid_params = {
             'kp': (0.0, 2.0),              # Proportional gain
@@ -261,6 +283,7 @@ class DecisionController:
             else:
                 print(f"⚠ Parameter 'ki' is only valid for PID controller")
                 return False
+
         elif param_name == 'kd':
             self.controller.kd = float(value)
         elif param_name == 'throttle_base':
@@ -272,5 +295,4 @@ class DecisionController:
         elif param_name == 'steer_max':
             self.throttle_policy['steer_max'] = float(value)
 
-        print(f"✓ Updated {param_name} = {value}")
         return True

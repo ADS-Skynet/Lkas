@@ -78,21 +78,54 @@ class DetectorFactory:
         return CVLaneDetector(**params)
 
     def _create_dl_detector(self, **kwargs) -> LaneDetector:
-        """Create Deep Learning detector."""
-        # Import here to avoid circular dependencies
-        from lkas.detection.method.deep_learning.lane_net import DLLaneDetector
-
+        """Create Deep Learning detector (PyTorch or Keras based on config)."""
         cfg = self.config.dl_detector
 
-        params = {
-            "model_type": kwargs.get("model_type", cfg.model_type),
-            "input_size": kwargs.get("input_size", cfg.input_size),
-            "threshold": kwargs.get("threshold", cfg.threshold),
-            "device": kwargs.get("device", cfg.device),
-            "model_path": kwargs.get("model_path", None),
-        }
+        # Get framework from kwargs or config
+        framework = kwargs.get("framework", cfg.framework).lower()
 
-        return DLLaneDetector(**params)
+        if framework == "pytorch":
+            # Import PyTorch detector
+            from lkas.detection.method.deep_learning.lane_net import DLLaneDetector
+
+            params = {
+                "model_type": kwargs.get("model_type", cfg.model_type),
+                "input_size": kwargs.get("input_size", cfg.input_size),
+                "threshold": kwargs.get("threshold", cfg.threshold),
+                "device": kwargs.get("device", cfg.device),
+                "model_path": kwargs.get("model_path", cfg.model_path),
+            }
+
+            return DLLaneDetector(**params)
+
+        elif framework == "keras":
+            # Import Keras detector
+            from lkas.detection.method.deep_learning.keras_lane_detector import KerasLaneDetector
+
+            params = {
+                "model_path": kwargs.get("model_path", cfg.model_path),
+                "input_size": kwargs.get("input_size", cfg.input_size),
+                "threshold": kwargs.get("threshold", cfg.threshold),
+            }
+
+            return KerasLaneDetector(**params)
+
+        elif framework == "tflite":
+            # Import TFLite detector
+            from lkas.detection.method.deep_learning.tflite_lane_detector import TFLiteLaneDetector
+
+            params = {
+                "model_path": kwargs.get("model_path", cfg.model_path),
+                "input_size": kwargs.get("input_size", cfg.input_size),
+                "threshold": kwargs.get("threshold", cfg.threshold),
+            }
+
+            return TFLiteLaneDetector(**params)
+
+        else:
+            raise ValueError(
+                f"Unknown framework: {framework}. Use 'pytorch', 'keras', or 'tflite'."
+            )
 
     @staticmethod
     def list_available_detectors() -> list:

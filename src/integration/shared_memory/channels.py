@@ -210,6 +210,7 @@ class SharedMemoryImageChannel:
         self.shape = shape
         self.height, self.width, self.channels = shape
         self._is_creator = create  # Track if we created this memory
+        self._unregistered = False  # Track if we've unregistered from resource tracker
 
         # Calculate sizes
         self.header_size = SharedImageHeader.byte_size()
@@ -286,9 +287,11 @@ class SharedMemoryImageChannel:
 
             # CRITICAL: Readers must manually unregister from resource tracker
             # Creators are handled automatically by unlink()
-            if not getattr(self, '_is_creator', False):
+            # Only unregister if we haven't already done so in close()
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
                 try:
                     resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
                 except (KeyError, ValueError, AttributeError):
                     pass
 
@@ -373,10 +376,32 @@ class SharedMemoryImageChannel:
         return None
 
     def close(self):
-        """Close shared memory - cleanup is handled automatically by __del__."""
-        # Trigger cleanup by deleting self (calls __del__)
-        # Python will handle the rest automatically
-        pass
+        """Close shared memory and unregister from resource tracker."""
+        try:
+            # Release array views first
+            if hasattr(self, 'image_view'):
+                del self.image_view
+            if hasattr(self, 'header_view'):
+                del self.header_view
+        except Exception:
+            pass
+
+        # Close and unregister shared memory
+        if hasattr(self, 'shm') and self.shm:
+            try:
+                self.shm.close()
+            except Exception:
+                pass
+
+            # CRITICAL: Readers must manually unregister from resource tracker
+            # to prevent "leaked shared_memory" warnings when creator unlinks first
+            # Mark as unregistered to prevent double-unregister in __del__
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
+                try:
+                    resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
+                except (KeyError, ValueError, AttributeError):
+                    pass
 
     def unlink(self):
         """Unlink (delete) shared memory."""
@@ -411,6 +436,7 @@ class SharedMemoryDetectionChannel:
         """
         self.name = name
         self._is_creator = create  # Track if we created this memory
+        self._unregistered = False  # Track if we've unregistered from resource tracker
 
         # Calculate sizes
         self.header_size = SharedDetectionHeader.byte_size()
@@ -487,9 +513,11 @@ class SharedMemoryDetectionChannel:
 
             # CRITICAL: Readers must manually unregister from resource tracker
             # Creators are handled automatically by unlink()
-            if not getattr(self, '_is_creator', False):
+            # Only unregister if we haven't already done so in close()
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
                 try:
                     resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
                 except (KeyError, ValueError, AttributeError):
                     pass
 
@@ -562,10 +590,34 @@ class SharedMemoryDetectionChannel:
             )
 
     def close(self):
-        """Close shared memory - cleanup is handled automatically by __del__."""
-        # Trigger cleanup by deleting self (calls __del__)
-        # Python will handle the rest automatically
-        pass
+        """Close shared memory and unregister from resource tracker."""
+        try:
+            # Release memory views first
+            if hasattr(self, 'header_view'):
+                del self.header_view
+            if hasattr(self, 'left_lane_view'):
+                del self.left_lane_view
+            if hasattr(self, 'right_lane_view'):
+                del self.right_lane_view
+        except Exception:
+            pass
+
+        # Close and unregister shared memory
+        if hasattr(self, 'shm') and self.shm:
+            try:
+                self.shm.close()
+            except Exception:
+                pass
+
+            # CRITICAL: Readers must manually unregister from resource tracker
+            # to prevent "leaked shared_memory" warnings when creator unlinks first
+            # Mark as unregistered to prevent double-unregister in __del__
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
+                try:
+                    resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
+                except (KeyError, ValueError, AttributeError):
+                    pass
 
     def unlink(self):
         """Unlink (delete) shared memory."""
@@ -834,6 +886,7 @@ class SharedMemoryControlChannel:
         """
         self.name = name
         self._is_creator = create  # Track if we created this memory
+        self._unregistered = False  # Track if we've unregistered from resource tracker
 
         # Calculate sizes
         self.header_size = SharedControlHeader.byte_size()
@@ -907,9 +960,11 @@ class SharedMemoryControlChannel:
 
             # CRITICAL: Readers must manually unregister from resource tracker
             # Creators are handled automatically by unlink()
-            if not getattr(self, '_is_creator', False):
+            # Only unregister if we haven't already done so in close()
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
                 try:
                     resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
                 except (KeyError, ValueError, AttributeError):
                     pass
 
@@ -989,10 +1044,32 @@ class SharedMemoryControlChannel:
         return None
 
     def close(self):
-        """Close shared memory - cleanup is handled automatically by __del__."""
-        # Trigger cleanup by deleting self (calls __del__)
-        # Python will handle the rest automatically
-        pass
+        """Close shared memory and unregister from resource tracker."""
+        try:
+            # Release memory views first
+            if hasattr(self, 'header_view'):
+                del self.header_view
+            if hasattr(self, 'data_view'):
+                del self.data_view
+        except Exception:
+            pass
+
+        # Close and unregister shared memory
+        if hasattr(self, 'shm') and self.shm:
+            try:
+                self.shm.close()
+            except Exception:
+                pass
+
+            # CRITICAL: Readers must manually unregister from resource tracker
+            # to prevent "leaked shared_memory" warnings when creator unlinks first
+            # Mark as unregistered to prevent double-unregister in __del__
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
+                try:
+                    resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
+                except (KeyError, ValueError, AttributeError):
+                    pass
 
     def unlink(self):
         """Unlink (delete) shared memory."""

@@ -224,12 +224,19 @@ class DLLaneDetector:
         else:
             self.device = torch.device(device)
 
-        print(f"Using device: {self.device}")
+        # Initialization logs go to stdout (visible in terminal)
+        # Error logs go to stderr (captured in log file)
+        print(f"✓ Using device: {self.device}", flush=True)
+        print(f"✓ Model type: {model_type}", flush=True)
+        print(f"✓ Custom weights: {model_path if model_path else 'None (using default)'}", flush=True)
 
         # Initialize model
         if model_type == 'pretrained' and SEGMENTATION_MODELS_AVAILABLE:
             # Use pre-trained U-Net with ResNet18 encoder
-            print("Loading pre-trained U-Net with ResNet18 encoder (ImageNet weights)...")
+            print("=" * 60, flush=True)
+            print("📦 Loading pre-trained U-Net architecture...", flush=True)
+            print("   Encoder: ResNet18 (ImageNet weights)", flush=True)
+            print("   Decoder: Random initialization (needs custom weights!)", flush=True)
             self.model = smp.Unet(
                 encoder_name="resnet18",        # Pre-trained ResNet18 backbone
                 encoder_weights="imagenet",     # Pre-trained on ImageNet
@@ -237,35 +244,124 @@ class DLLaneDetector:
                 classes=1,                      # Binary segmentation (lane/background)
                 activation=None,                # We'll apply sigmoid manually
             )
-            print("✓ Pre-trained model loaded successfully!")
+            print("✓ UNet architecture loaded successfully!", flush=True)
         elif model_type == 'simple':
-            print("Using custom SimpleLaneNet...")
+            print("📦 Using custom SimpleLaneNet...", flush=True)
             self.model = SimpleLaneNet()
         else:
-            print("Using custom LaneNet...")
+            print("📦 Using custom LaneNet...", flush=True)
             self.model = LaneNet()
 
+        print(f"✓ Moving model to device: {self.device}", flush=True)
         self.model.to(self.device)
 
         # Load custom pretrained weights if provided
         if model_path:
+            print("=" * 60, flush=True)
+            print(f"🔄 Loading custom weights from: {model_path}", flush=True)
             self.load_weights(model_path)
+        else:
+            print("=" * 60, flush=True)
+            print("⚠️  WARNING: No custom weights provided!", flush=True)
+            print("   Decoder has random weights - will NOT work for lane detection!", flush=True)
+            print("   Add model_path to config.yaml to use trained model", flush=True)
+            print("=" * 60, flush=True)
 
+        print("✓ Setting model to evaluation mode...", flush=True)
         self.model.eval()
+        print("✓ DL Lane Detector initialization complete!", flush=True)
+        print("=" * 60, flush=True)
 
     def load_weights(self, model_path: str):
         """
-        Load model weights from file.
+        Load model weights from file or Hugging Face Hub.
 
         Args:
-            model_path: Path to model weights
+            model_path: Path to model weights or HF Hub model ID
+                       Examples:
+                       - Local: "models/lane_model.pth"
+                       - HF Hub: "hf://Tilak1812/lane-detection-unet-tusimple"
+                       - HF Hub (short): "Tilak1812/lane-detection-unet-tusimple"
         """
+        import sys
         try:
+            # Check if it's a Hugging Face Hub model
+            if model_path.startswith("hf://") or ("/" in model_path and not model_path.startswith("/")):
+                # Remove hf:// prefix if present
+                hf_model_id = model_path.replace("hf://", "")
+
+                print("🤗 Hugging Face Hub model detected!", flush=True)
+                print(f"   Repository: {hf_model_id}", flush=True)
+                print(f"   Attempting to download...", flush=True)
+                try:
+                    from huggingface_hub import hf_hub_download
+
+                    # Download the model file from HF Hub
+                    # Try common naming conventions
+                    filenames = ["pytorch_model.bin", "model.pth", "best_model.pth", "lane_model.pth", "best_model.keras"]
+                    print(f"   Trying filenames: {', '.join(filenames)}", flush=True)
+
+                    found_file = None
+                    for filename in filenames:
+                        try:
+                            print(f"   → Trying {filename}...", end=" ", flush=True)
+                            local_path = hf_hub_download(
+                                repo_id=hf_model_id,
+                                filename=filename,
+                                cache_dir=".cache/huggingface"
+                            )
+                            model_path = local_path
+                            found_file = filename
+                            print(f"✓ Found!", flush=True)
+                            print(f"✓ Downloaded to: {local_path}", flush=True)
+                            break
+                        except Exception as e:
+                            print(f"✗ Not found", flush=True)
+                            continue
+                    else:
+                        # Error: write to stderr for log file
+                        print(f"\n✗ ERROR: Could not find model file in {hf_model_id}", file=sys.stderr, flush=True)
+                        print(f"   Tried: {', '.join(filenames)}", file=sys.stderr, flush=True)
+                        print(f"   Check the repo at: https://huggingface.co/{hf_model_id}", file=sys.stderr, flush=True)
+                        raise FileNotFoundError(f"No model file found in {hf_model_id}")
+
+                    # Check if it's a Keras model
+                    if found_file and found_file.endswith('.keras'):
+                        print("=" * 60, flush=True)
+                        print("⚠️  WARNING: Found Keras model (.keras file)!", file=sys.stderr, flush=True)
+                        print("   This codebase uses PyTorch, not TensorFlow/Keras!", file=sys.stderr, flush=True)
+                        print("   You need to convert the model to PyTorch format.", file=sys.stderr, flush=True)
+                        print("", file=sys.stderr, flush=True)
+                        print("   📖 See: scripts/HUGGINGFACE_SETUP.md for conversion guide", file=sys.stderr, flush=True)
+                        print("   🔧 Run: python scripts/convert_keras_to_pytorch.py \\", file=sys.stderr, flush=True)
+                        print(f"           --repo {hf_model_id} \\", file=sys.stderr, flush=True)
+                        print("           --upload YOUR_USERNAME/lane-detection-unet-tusimple", file=sys.stderr, flush=True)
+                        print("=" * 60, flush=True)
+                        raise ValueError(f"Cannot load Keras model. Please convert to PyTorch format first.")
+
+                except ImportError:
+                    # Error: write to stderr for log file
+                    print("✗ ERROR: huggingface_hub not installed!", file=sys.stderr, flush=True)
+                    print("   Install with: pip install huggingface_hub", file=sys.stderr, flush=True)
+                    print("   Falling back to local path (will likely fail)...", file=sys.stderr, flush=True)
+
+            # Load the model weights
             state_dict = torch.load(model_path, map_location=self.device)
+
+            # Handle different state dict formats
+            if 'model_state_dict' in state_dict:
+                state_dict = state_dict['model_state_dict']
+            elif 'state_dict' in state_dict:
+                state_dict = state_dict['state_dict']
+
             self.model.load_state_dict(state_dict)
-            print(f"Loaded model weights from {model_path}")
+            print(f"✓ Loaded model weights from {model_path}", flush=True)
+
         except Exception as e:
-            print(f"Failed to load model weights: {e}")
+            # Error: write to stderr for log file
+            print(f"✗ Failed to load model weights: {e}", file=sys.stderr, flush=True)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
 
     def save_weights(self, model_path: str):
         """
@@ -302,26 +398,31 @@ class DLLaneDetector:
         return tensor.to(self.device)
 
     def postprocess(self, output: torch.Tensor, original_size: Tuple[int, int]) -> np.ndarray:
-        """
-        Postprocess model output to binary mask.
-
-        Args:
-            output: Model output tensor
-            original_size: Original image size (height, width)
-
-        Returns:
-            Binary lane mask
-        """
-        # Remove batch dimension and convert to numpy
+        # Remove batch dimension and convert to NumPy
         mask = output.squeeze().cpu().detach().numpy()
 
-        # Apply threshold
-        binary_mask = (mask > self.threshold).astype(np.uint8) * 255
+        # Apply threshold to obtain raw binary segmentation
+        binary_mask = (mask > self.threshold).astype(np.uint8)
 
-        # Resize to original size
+        kernel = np.ones((5, 5), np.uint8)
+
+        # Remove small noise
+        binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        # Connect broken segments
+        binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+        # Slightly thicken lines
+        binary_mask = cv2.dilate(binary_mask, kernel, iterations=1)
+
+        # Convert 0/1 mask → 0/255
+        binary_mask = binary_mask * 255
+
+        # Resize back to original resolution
         resized_mask = cv2.resize(binary_mask, (original_size[1], original_size[0]))
 
         return resized_mask
+
 
     def detect(self, image: np.ndarray) -> Tuple[Tuple | None, Tuple | None, np.ndarray]:
         """

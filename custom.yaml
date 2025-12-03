@@ -1,0 +1,178 @@
+# Common Configuration - Default Values
+# This file serves as the default configuration for all shared parameters
+# across the Skynet autonomous driving system.
+
+# Inter-process Communication
+communication:
+  # Shared Memory Channel Names
+  image_shm_name: "image"
+  detection_shm_name: "detection"
+  control_shm_name: "control"
+
+  # ZMQ Base Ports
+  zmq_broadcast_port: 5557      # Simulation -> Viewer (frame/detection/state)
+  zmq_action_port: 5558         # Viewer -> Simulation (action commands)
+  zmq_parameter_port: 5559      # Parameter updates
+
+  # ZMQ Broker Derived Ports (used by LKAS broker)
+  zmq_param_servers_port: 5560     # Parameter forwarding to servers
+  zmq_action_forward_port: 5561    # Action forwarding to simulation
+  zmq_vehicle_status_port: 5562    # Vehicle status broadcasting
+
+  # Default hosts
+  zmq_broadcast_host: "localhost"
+
+  # ZMQ Socket Options
+  zmq_socket:
+    send_hwm: 10                    # SNDHWM - Send high water mark
+    recv_hwm: 10                    # RCVHWM - Receive high water mark
+    recv_timeout_ms: 100            # RCVTIMEO - Standard receive timeout
+    param_recv_timeout_ms: 10       # RCVTIMEO for parameter updates (faster)
+    linger_ms: 0                    # LINGER - Time to wait on close
+    connection_delay_s: 0.1         # Delay after connection (slow-joiner fix)
+
+# CARLA Simulator
+carla:
+  host: "localhost"
+  port: 2000
+  timeout: 10.0
+  vehicle_type: "vehicle.tesla.model3"
+
+# Camera Sensor
+camera:
+  width: 640
+  height: 480
+  fov: 90.0
+  position:
+    x: 2.0    # Forward from vehicle center
+    y: 0.0    # Right from vehicle center
+    z: 1.5    # Up from vehicle center
+  rotation:
+    pitch: -10.0  # Tilt down
+    yaw: 0.0
+    roll: 0.0
+
+# Computer Vision Detector
+cv_detector:
+  # Canny edge detection
+  canny_low: 50
+  canny_high: 150
+
+  # Hough transform
+  hough_rho: 2
+  hough_theta: 0.017453  # 1 degree in radians (pi/180)
+  hough_threshold: 50
+  hough_min_line_len: 40
+  hough_max_line_gap: 100
+
+  # Temporal smoothing
+  smoothing_factor: 0.7
+
+  # Lane detection thresholds
+  min_slope: 0.5  # Minimum absolute slope to be considered a lane
+
+  # ROI configuration (broader detection area)
+  roi_bottom_left_x: 0.05   # Fraction of width (bottom-left corner)
+  roi_top_left_x: 0.35      # Fraction of width (top-left corner)
+  roi_top_right_x: 0.65     # Fraction of width (top-right corner)
+  roi_bottom_right_x: 0.95  # Fraction of width (bottom-right corner)
+  roi_top_y: 0.5            # Fraction of height (look at top 50% of image)
+
+# Deep Learning Detector
+dl_detector:
+  framework: "tflite"  # Using TFLite for performance
+  model_type: "pretrained"
+  model_path: "unet_model/cluster_quantized_activations.tflite"  # 6MB quantized model
+  input_size: [640, 384]  # TFLite model input size
+  threshold: 0.5
+  device: "auto"
+
+# Lane Analyzer
+lane_analyzer:
+  drift_threshold: 0.15      # 15% of lane width
+  departure_threshold: 0.35  # 35% of lane width
+  lane_width_meters: 3.7     # Standard US highway lane
+  max_heading_degrees: 30.0  # Maximum heading angle
+
+# Controller Configuration
+controller:
+  method: "pid"  # Controller type: "pd" or "pid"
+  kp: 0.5        # Proportional gain
+  ki: 0.01       # Integral gain (PID only)
+  kd: 0.1        # Derivative gain
+
+# Throttle Control Policy
+# Adaptive throttle reduces speed during sharp turns
+throttle_policy:
+  base: 0.10              # Base throttle when steering is minimal
+  min: 0.05               # Minimum throttle during sharp turns
+  steer_threshold: 0.15   # Steering magnitude to start reducing throttle
+  steer_max: 0.70         # Maximum expected steering magnitude
+
+# Visualization
+visualization:
+  show_spectator_overlay: true
+  follow_with_spectator: false
+  alert_blink_frequency: 10
+
+  # Web viewer port
+  web_port: 8080
+
+  # Colors (BGR format for OpenCV)
+  color_left_lane: [255, 0, 0]    # Blue
+  color_right_lane: [0, 0, 255]   # Red
+  color_lane_fill: [0, 255, 0]    # Green
+  color_centered: [0, 255, 0]     # Green
+  color_drift: [0, 255, 255]      # Yellow
+  color_departure: [0, 0, 255]    # Red
+
+  # HUD settings
+  hud_font_scale: 0.6
+  hud_thickness: 2
+  hud_margin: 20
+
+# Connection Retry Configuration
+retry:
+  max_retries: 20                 # Standard retry count
+  retry_delay_s: 0.5              # Standard retry delay (seconds)
+  extended_max_retries: 120       # For shared memory initialization (increased for DL model loading)
+  extended_retry_delay_s: 1.0     # Extended retry delay (seconds)
+
+# System Timing
+timing:
+  main_loop_sleep_s: 0.01         # Main loop sleep interval
+  post_decision_delay_s: 0.5      # Delay after decision making
+  pause_sleep_s: 0.1              # Sleep during pause state
+  busy_wait_sleep_s: 0.001        # Shared memory busy-wait interval
+  warmup_duration_s: 2.5          # System warmup duration
+
+# Video Streaming and Compression
+streaming:
+  jpeg_quality: 75                # JPEG compression quality (0-100, 85-90 is good balance)
+  raw_rgb: true                  # Send raw RGB instead of JPEG (false = use JPEG compression)
+  web_viewer_fps: 60              # Web viewer target FPS
+  stream_frame_delay_ms: 15       # Frame delay for streaming (~60fps)
+  broadcast_log_interval: 100     # Log every N frames
+
+# Process Launcher
+launcher:
+  decision_init_timeout_s: 3.0    # Decision process init timeout
+  detection_init_timeout_s: 120.0 # Detection process init timeout (increased for model download)
+  process_stop_timeout_s: 5.0     # Process termination timeout
+  terminal_width: 70              # Terminal output width
+  subprocess_prefix: "[SubProc]"  # Subprocess log prefix
+  log_file: "lkas_run.log"        # Default log file name
+  buffer_read_size: 4096          # Subprocess output buffer size (bytes)
+
+# Control Signal Limits
+control_limits:
+  max_steering: 1.0               # Maximum steering angle (normalized)
+  min_steering: -1.0              # Minimum steering angle (normalized)
+  max_throttle: 1.0               # Maximum throttle
+  min_throttle: 0.0               # Minimum throttle
+  max_brake: 1.0                  # Maximum brake
+  min_brake: 0.0                  # Minimum brake
+
+# System Settings
+system:
+  detection_method: "cv"  # "cv" or "dl"
