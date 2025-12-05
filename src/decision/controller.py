@@ -13,6 +13,7 @@ from lkas.integration.messages import (
 )
 from lkas.decision.lane_analyzer import LaneAnalyzer
 from lkas.decision.pd_controller import PDController
+from lkas.decision.pid_controller import PIDController
 
 
 class DecisionController:
@@ -31,7 +32,9 @@ class DecisionController:
         image_width: int,
         image_height: int,
         kp: float = 0.5,
+        ki: float = 0.01,
         kd: float = 0.1,
+        controller_method: str = "pd",
         throttle_policy: dict | None = None,
     ):
         """
@@ -41,7 +44,9 @@ class DecisionController:
             image_width: Camera image width
             image_height: Camera image height
             kp: Proportional gain for steering control
+            ki: Integral gain for steering control (PID only)
             kd: Derivative gain for steering control
+            controller_method: Controller type ('pd' or 'pid')
             throttle_policy: Adaptive throttle configuration dict with keys:
                 - base: Base throttle value (default: 0.45)
                 - min: Minimum throttle value (default: 0.18)
@@ -51,8 +56,12 @@ class DecisionController:
         # Lane analysis
         self.analyzer = LaneAnalyzer(image_width=image_width, image_height=image_height)
 
-        # Steering control
-        self.pd_controller = PDController(kp=kp, kd=kd)
+        # Steering control - instantiate based on controller_method
+        self.controller_method = controller_method.lower()
+        if self.controller_method == "pid":
+            self.controller = PIDController(kp=kp, ki=ki, kd=kd)
+        else:  # Default to PD
+            self.controller = PDController(kp=kp, kd=kd)
 
         # Adaptive throttle policy
         self.throttle_policy = throttle_policy or {
@@ -135,7 +144,7 @@ class DecisionController:
         metrics = self.analyzer.get_metrics(left_lane, right_lane)
 
         # Compute steering from metrics
-        steering = self.pd_controller.compute_steering(metrics)
+        steering = self.controller.compute_steering(metrics)
 
         # If no steering computed (e.g., no lanes detected), use safe default
         if steering is None:
@@ -151,14 +160,17 @@ class DecisionController:
                 throttle = self.default_throttle
             brake = self.default_brake
 
-        # Create control message
+        # Create control message with complete metrics
         control = ControlMessage(
             steering=steering,
             throttle=throttle,
             brake=brake,
             mode=self.mode,
             lateral_offset=metrics.lateral_offset_normalized,
+            lateral_offset_meters=metrics.lateral_offset_meters,
             heading_angle=metrics.heading_angle_deg,
+            lane_width_pixels=metrics.lane_width_pixels,
+            departure_status=metrics.departure_status.value if metrics.departure_status else None,
         )
 
         # Ensure values are clamped
@@ -175,17 +187,55 @@ class DecisionController:
         self.default_throttle = max(0.0, min(1.0, throttle))
         self.default_brake = max(0.0, min(1.0, brake))
 
-    def set_controller_gains(self, kp: float, kd: float):
-        """Update PD controller gains."""
-        self.pd_controller.set_gains(kp, kd)
+    def set_controller_gains(self, kp: float, ki: float | None = None, kd: float | None = None):
+        """
+        Update controller gains.
+
+        Args:
+            kp: Proportional gain
+            ki: Integral gain (for PID only, optional)
+            kd: Derivative gain (optional)
+        """
+        if self.controller_method == "pid":
+            # For PID, set all three gains
+            current_gains = self.controller.get_gains()
+            ki_val = ki if ki is not None else current_gains[1]
+            kd_val = kd if kd is not None else current_gains[2]
+            self.controller.set_gains(kp, ki_val, kd_val)
+        else:
+            # For PD, only set kp and kd
+            kd_val = kd if kd is not None else self.controller.get_gains()[1]
+            self.controller.set_gains(kp, kd_val)
 
     def get_controller_gains(self) -> tuple:
-        """Get current controller gains."""
-        return self.pd_controller.get_gains()
+        """
+        Get current controller gains.
+
+        Returns:
+            Tuple of (kp, kd) for PD or (kp, ki, kd) for PID
+        """
+        return self.controller.get_gains()
 
     def get_analyzer(self) -> LaneAnalyzer:
         """Get lane analyzer instance."""
         return self.analyzer
+
+    def reset_state(self):
+        """
+        Reset controller state (PID error accumulation and derivative).
+
+        Used when:
+            - User presses reset button
+            - Starting a new session
+            - After significant disturbance
+
+        Only affects PID controller (PD controller has no state to reset).
+        """
+        if self.controller_method == "pid":
+            self.controller.reset_state()
+            # print("✓ PID controller state reset (integral and derivative cleared)")
+        # else:
+            # print("ℹ PD controller has no state to reset")
 
     def update_parameter(self, param_name: str, value: float) -> bool:
         """
@@ -198,9 +248,15 @@ class DecisionController:
         Returns:
             True if parameter was updated successfully, False otherwise
         """
+        # Handle special 'reset' parameter
+        if param_name == 'reset':
+            self.reset_state()
+            return True
+
         # Map of valid parameters and their value constraints
         valid_params = {
             'kp': (0.0, 2.0),              # Proportional gain
+            'ki': (0.0, 0.5),              # Integral gain (PID only)
             'kd': (0.0, 1.0),              # Derivative gain
             'throttle_base': (0.0, 1.0),   # Base throttle
             'throttle_min': (0.0, 1.0),    # Minimum throttle
@@ -220,9 +276,16 @@ class DecisionController:
 
         # Update the parameter
         if param_name == 'kp':
-            self.pd_controller.kp = float(value)
+            self.controller.kp = float(value)
+        elif param_name == 'ki':
+            if self.controller_method == 'pid':
+                self.controller.ki = float(value)
+            else:
+                print(f"⚠ Parameter 'ki' is only valid for PID controller")
+                return False
+
         elif param_name == 'kd':
-            self.pd_controller.kd = float(value)
+            self.controller.kd = float(value)
         elif param_name == 'throttle_base':
             self.throttle_policy['base'] = float(value)
         elif param_name == 'throttle_min':
@@ -232,5 +295,4 @@ class DecisionController:
         elif param_name == 'steer_max':
             self.throttle_policy['steer_max'] = float(value)
 
-        print(f"✓ Updated {param_name} = {value}")
         return True

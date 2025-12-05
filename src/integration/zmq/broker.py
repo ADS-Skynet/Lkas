@@ -140,7 +140,7 @@ class LKASBroker:
 
         print("=" * 60)
         print("Broker ready to route and broadcast")
-        print("=" * 60 + "\n")
+        print("=" * 60)
 
     # =========================================================================
     # Parameter Routing
@@ -307,11 +307,10 @@ class LKASBroker:
             paused = data.get('paused', False)
             steering = data.get('steering', 0.0)
             speed_kmh = data.get('speed_kmh', 0.0)
+            throttle = data.get('throttle', 0.0)
 
-            if self.vehicle_status_count == 1:
-                print(f"[Broker] First vehicle status received: paused={paused}, steering={steering:.3f}")
-            elif self.verbose and self.vehicle_status_count % 50 == 0:  # Every 50 messages
-                print(f"[Broker] Vehicle status #{self.vehicle_status_count}: paused={paused}, steering={steering:.3f}, speed={speed_kmh:.1f}km/h")
+            if self.verbose and self.vehicle_status_count % 50 == 0:  # Every 50 messages
+                print(f"[Broker] Vehicle status #{self.vehicle_status_count}: paused={paused}, steering={steering:.3f}, speed={speed_kmh:.1f}km/h, throttle={throttle:.3f}")
 
             return True
 
@@ -381,7 +380,7 @@ class LKASBroker:
 
     def close(self):
         """Close broker and cleanup resources."""
-        print("\n[Broker] Shutting down...")
+        print("\nStopping broker server...")
 
         # Close broadcaster
         if self.broadcaster:
@@ -403,7 +402,7 @@ class LKASBroker:
         if self.owns_context and self.context:
             self.context.term()
 
-        print("[Broker] Shutdown complete")
+        print("✓ Broker server stopped")
 
     def get_stats(self) -> Dict[str, int]:
         """Get broker statistics."""

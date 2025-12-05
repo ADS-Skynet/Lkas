@@ -116,6 +116,7 @@ class LKASBrokerRunner:
                 # Read frame from shared memory and broadcast
                 image_msg = self.image_channel.read(copy=False)
                 if image_msg and image_msg.frame_id != last_frame_id:
+                    print("sending frame", image_msg.frame_id)
                     # Broadcast frame to viewers
                     self.broker.broadcast_frame(
                         image_msg.image,

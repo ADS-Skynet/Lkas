@@ -105,21 +105,21 @@ class DetectionServer:
             self.last_print_time = time.time()
 
             # Setup parameter updates if enabled
-            self.param_client = None
+            self.param_sub = None
             if enable_parameter_updates:
-                from lkas.integration.zmq import ParameterClient
+                from skynet_common.communication import ParameterSubscriber
 
                 print(f"\nSetting up real-time parameter updates...")
-                self.param_client = ParameterClient(
+                self.param_sub = ParameterSubscriber(
                     category='detection',
                     broker_url=parameter_broker_url
                 )
-                self.param_client.register_callback(self._on_parameter_update)
+                self.param_sub.register_callback(self._on_parameter_update)
                 print(f"✓ Parameter updates enabled")
 
-            print("\n" + "=" * 60)
-            print("Server initialized successfully!")
-            print("=" * 60)
+            # print("\n" + "=" * 60)
+            # print("Server initialized successfully!")
+            # print("=" * 60)
 
         except Exception as e:
             # Cleanup on initialization failure
@@ -173,13 +173,7 @@ class DetectionServer:
         detector_impl = self.detector.detector  # Access the actual CV/DL detector
 
         if hasattr(detector_impl, 'update_parameter'):
-            success = detector_impl.update_parameter(param_name, value)
-        #     if success:
-        #         print(f"[Detection] Parameter updated: {param_name} = {value}")
-        #     else:
-        #         print(f"[Detection] Failed to update parameter: {param_name}")
-        # else:
-        #     print(f"[Detection] Detector does not support parameter updates")
+            detector_impl.update_parameter(param_name, value)
 
     def run(self, print_stats: bool = True):
         """
@@ -198,20 +192,16 @@ class DetectionServer:
         signal.signal(signal.SIGTERM, signal_handler)
 
         print("\n" + "=" * 60)
-        print("Detection Server Running")
+        print("Detection Server Started")
         print("=" * 60)
-        print(f"Reading images from: {self.image_channel.name}")
-        print(f"Writing detections to: {self.detection_channel.name}")
-        print("Press Ctrl+C to stop")
-        print("=" * 60 + "\n")
 
         self.running = True
 
         try:
             while self.running:
                 # Poll for parameter updates (non-blocking)
-                if self.param_client:
-                    self.param_client.poll()
+                if self.param_sub:
+                    self.param_sub.poll()
 
                 # Read image from shared memory (non-blocking with timeout)
                 image_msg = self.image_channel.read_blocking(timeout=0.1, copy=True)
@@ -252,8 +242,8 @@ class DetectionServer:
         self.running = False
 
         # Close parameter client
-        if self.param_client:
-            self.param_client.close()
+        if self.param_sub:
+            self.param_sub.close()
 
         # Close and unlink channels (we created them)
         if self.image_channel:

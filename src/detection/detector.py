@@ -75,13 +75,14 @@ class LaneDetection:
             )
 
         # Create detection message
+        # Note: No debug_image - viewer handles all overlays on laptop side
         detection_msg = DetectionMessage(
             left_lane=left_lane_msg,
             right_lane=right_lane_msg,
             processing_time_ms=result.processing_time_ms,
             frame_id=image_msg.frame_id,
             timestamp=image_msg.timestamp,
-            debug_image=result.debug_image,
+            debug_image=None,  # Viewer draws overlays, not LKAS
         )
 
         return detection_msg

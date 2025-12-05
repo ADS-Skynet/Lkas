@@ -210,6 +210,7 @@ class SharedMemoryImageChannel:
         self.shape = shape
         self.height, self.width, self.channels = shape
         self._is_creator = create  # Track if we created this memory
+        self._unregistered = False  # Track if we've unregistered from resource tracker
 
         # Calculate sizes
         self.header_size = SharedImageHeader.byte_size()
@@ -286,9 +287,11 @@ class SharedMemoryImageChannel:
 
             # CRITICAL: Readers must manually unregister from resource tracker
             # Creators are handled automatically by unlink()
-            if not getattr(self, '_is_creator', False):
+            # Only unregister if we haven't already done so in close()
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
                 try:
                     resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
                 except (KeyError, ValueError, AttributeError):
                     pass
 
@@ -373,10 +376,32 @@ class SharedMemoryImageChannel:
         return None
 
     def close(self):
-        """Close shared memory - cleanup is handled automatically by __del__."""
-        # Trigger cleanup by deleting self (calls __del__)
-        # Python will handle the rest automatically
-        pass
+        """Close shared memory and unregister from resource tracker."""
+        try:
+            # Release array views first
+            if hasattr(self, 'image_view'):
+                del self.image_view
+            if hasattr(self, 'header_view'):
+                del self.header_view
+        except Exception:
+            pass
+
+        # Close and unregister shared memory
+        if hasattr(self, 'shm') and self.shm:
+            try:
+                self.shm.close()
+            except Exception:
+                pass
+
+            # CRITICAL: Readers must manually unregister from resource tracker
+            # to prevent "leaked shared_memory" warnings when creator unlinks first
+            # Mark as unregistered to prevent double-unregister in __del__
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
+                try:
+                    resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
+                except (KeyError, ValueError, AttributeError):
+                    pass
 
     def unlink(self):
         """Unlink (delete) shared memory."""
@@ -411,6 +436,7 @@ class SharedMemoryDetectionChannel:
         """
         self.name = name
         self._is_creator = create  # Track if we created this memory
+        self._unregistered = False  # Track if we've unregistered from resource tracker
 
         # Calculate sizes
         self.header_size = SharedDetectionHeader.byte_size()
@@ -487,9 +513,11 @@ class SharedMemoryDetectionChannel:
 
             # CRITICAL: Readers must manually unregister from resource tracker
             # Creators are handled automatically by unlink()
-            if not getattr(self, '_is_creator', False):
+            # Only unregister if we haven't already done so in close()
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
                 try:
                     resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
                 except (KeyError, ValueError, AttributeError):
                     pass
 
@@ -562,10 +590,34 @@ class SharedMemoryDetectionChannel:
             )
 
     def close(self):
-        """Close shared memory - cleanup is handled automatically by __del__."""
-        # Trigger cleanup by deleting self (calls __del__)
-        # Python will handle the rest automatically
-        pass
+        """Close shared memory and unregister from resource tracker."""
+        try:
+            # Release memory views first
+            if hasattr(self, 'header_view'):
+                del self.header_view
+            if hasattr(self, 'left_lane_view'):
+                del self.left_lane_view
+            if hasattr(self, 'right_lane_view'):
+                del self.right_lane_view
+        except Exception:
+            pass
+
+        # Close and unregister shared memory
+        if hasattr(self, 'shm') and self.shm:
+            try:
+                self.shm.close()
+            except Exception:
+                pass
+
+            # CRITICAL: Readers must manually unregister from resource tracker
+            # to prevent "leaked shared_memory" warnings when creator unlinks first
+            # Mark as unregistered to prevent double-unregister in __del__
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
+                try:
+                    resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
+                except (KeyError, ValueError, AttributeError):
+                    pass
 
     def unlink(self):
         """Unlink (delete) shared memory."""
@@ -590,7 +642,7 @@ Shared Memory Control Channel
 Dedicated communication channel for control commands between decision and vehicle modules.
 
 Memory Layout:
-    [Header: 48 bytes][Control Data: 32 bytes] = Total: 80 bytes
+    [Header: 48 bytes][Control Data: 88 bytes] = Total: 136 bytes
 
 Performance:
 - Control → Vehicle: ~0.001ms (shared memory copy)
@@ -676,43 +728,70 @@ class SharedControlData:
     """
     Control command data.
 
-    Memory layout (32 bytes):
+    Memory layout (88 bytes):
     - steering: 8 bytes (double) - Range [-1.0, 1.0]
     - throttle: 8 bytes (double) - Range [0.0, 1.0]
     - brake: 8 bytes (double) - Range [0.0, 1.0]
     - lateral_offset: 8 bytes (double) - Normalized lateral offset (for telemetry)
-
-    Note: heading_angle omitted to keep structure compact. Can add in future if needed.
+    - lateral_offset_meters: 8 bytes (double) - Lateral offset in meters
+    - heading_angle: 8 bytes (double) - Heading angle in degrees
+    - lane_width_pixels: 8 bytes (double) - Lane width in pixels
+    - departure_status: 32 bytes (string) - Lane departure status string
     """
     steering: float
     throttle: float
     brake: float
     lateral_offset: float
+    lateral_offset_meters: float
+    heading_angle: float
+    lane_width_pixels: float
+    departure_status: str
 
     @staticmethod
     def byte_size():
-        """Size in bytes: 4 doubles = 32 bytes"""
-        return struct.calcsize('dddd')
+        """Size in bytes: 7 doubles + 32 char string = 88 bytes"""
+        return struct.calcsize('ddddddd32s')
 
     def pack(self) -> bytes:
         """Pack control data to bytes."""
+        # Convert None to 0.0 for numeric fields
+        lateral_offset_m = self.lateral_offset_meters if self.lateral_offset_meters is not None else 0.0
+        heading = self.heading_angle if self.heading_angle is not None else 0.0
+        lane_width = self.lane_width_pixels if self.lane_width_pixels is not None else 0.0
+
+        # Convert status string to bytes (max 32 chars)
+        status_bytes = (self.departure_status or '').encode('utf-8')[:31] + b'\x00'
+        status_bytes = status_bytes.ljust(32, b'\x00')
+
         return struct.pack(
-            'dddd',
+            'ddddddd32s',
             self.steering,
             self.throttle,
             self.brake,
-            self.lateral_offset
+            self.lateral_offset,
+            lateral_offset_m,
+            heading,
+            lane_width,
+            status_bytes
         )
 
     @staticmethod
     def unpack(data: bytes) -> 'SharedControlData':
         """Unpack control data from bytes."""
-        values = struct.unpack('dddd', data)
+        values = struct.unpack('ddddddd32s', data)
+
+        # Decode status string
+        status_str = values[7].rstrip(b'\x00').decode('utf-8') if values[7] else None
+
         return SharedControlData(
             steering=values[0],
             throttle=values[1],
             brake=values[2],
-            lateral_offset=values[3]
+            lateral_offset=values[3],
+            lateral_offset_meters=values[4] if values[4] != 0.0 else None,
+            heading_angle=values[5] if values[5] != 0.0 else None,
+            lane_width_pixels=values[6] if values[6] != 0.0 else None,
+            departure_status=status_str
         )
 
     def to_control_message(self, frame_id: int, timestamp: float, mode: ControlMode) -> ControlMessage:
@@ -723,7 +802,10 @@ class SharedControlData:
             brake=self.brake,
             mode=mode,
             lateral_offset=self.lateral_offset,
-            heading_angle=None  # Not stored in shared memory (space optimization)
+            lateral_offset_meters=self.lateral_offset_meters,
+            heading_angle=self.heading_angle,
+            lane_width_pixels=self.lane_width_pixels,
+            departure_status=self.departure_status
         )
 
     @staticmethod
@@ -733,7 +815,11 @@ class SharedControlData:
             steering=control.steering,
             throttle=control.throttle,
             brake=control.brake,
-            lateral_offset=control.lateral_offset or 0.0
+            lateral_offset=control.lateral_offset or 0.0,
+            lateral_offset_meters=control.lateral_offset_meters,
+            heading_angle=control.heading_angle,
+            lane_width_pixels=control.lane_width_pixels,
+            departure_status=control.departure_status
         )
 
 
@@ -770,7 +856,7 @@ class SharedMemoryControlChannel:
     High-performance shared memory channel for control commands.
 
     Memory Layout:
-        [Header: 48 bytes][Control Data: 32 bytes] = 80 bytes total
+        [Header: 48 bytes][Control Data: 88 bytes] = 136 bytes total
 
     Usage:
         # Writer (Decision Process)
@@ -800,6 +886,7 @@ class SharedMemoryControlChannel:
         """
         self.name = name
         self._is_creator = create  # Track if we created this memory
+        self._unregistered = False  # Track if we've unregistered from resource tracker
 
         # Calculate sizes
         self.header_size = SharedControlHeader.byte_size()
@@ -873,9 +960,11 @@ class SharedMemoryControlChannel:
 
             # CRITICAL: Readers must manually unregister from resource tracker
             # Creators are handled automatically by unlink()
-            if not getattr(self, '_is_creator', False):
+            # Only unregister if we haven't already done so in close()
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
                 try:
                     resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
                 except (KeyError, ValueError, AttributeError):
                     pass
 
@@ -955,10 +1044,32 @@ class SharedMemoryControlChannel:
         return None
 
     def close(self):
-        """Close shared memory - cleanup is handled automatically by __del__."""
-        # Trigger cleanup by deleting self (calls __del__)
-        # Python will handle the rest automatically
-        pass
+        """Close shared memory and unregister from resource tracker."""
+        try:
+            # Release memory views first
+            if hasattr(self, 'header_view'):
+                del self.header_view
+            if hasattr(self, 'data_view'):
+                del self.data_view
+        except Exception:
+            pass
+
+        # Close and unregister shared memory
+        if hasattr(self, 'shm') and self.shm:
+            try:
+                self.shm.close()
+            except Exception:
+                pass
+
+            # CRITICAL: Readers must manually unregister from resource tracker
+            # to prevent "leaked shared_memory" warnings when creator unlinks first
+            # Mark as unregistered to prevent double-unregister in __del__
+            if not getattr(self, '_is_creator', False) and not getattr(self, '_unregistered', False):
+                try:
+                    resource_tracker.unregister(self.shm._name, "shared_memory")
+                    self._unregistered = True
+                except (KeyError, ValueError, AttributeError):
+                    pass
 
     def unlink(self):
         """Unlink (delete) shared memory."""

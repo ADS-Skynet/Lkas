@@ -104,8 +104,7 @@ packages = [
     "lkas.utils",
 ]
 
-[tool.setuptools.package-data]
-"*" = ["*.yaml", "*.yml", "*.json"]
+# No package data needed - using constants.py instead
 
 # Black code formatter configuration
 [tool.black]
@@ -165,3 +164,10 @@ warn_no_return = true
 [[tool.mypy.overrides]]
 module = ["carla.*", "cv2.*", "pygame.*", "flask.*"]
 ignore_missing_imports = true
+
+# pyright/pylance type checker configuration
+[tool.pyright]
+include = ["src"]
+extraPaths = ["src"]
+pythonVersion = "3.10"
+pythonPlatform = "Linux"

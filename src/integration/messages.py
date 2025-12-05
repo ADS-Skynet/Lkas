@@ -122,17 +122,22 @@ class ControlMessage:
         throttle: Throttle [0, 1]
         brake: Brake [0, 1]
         mode: Control mode
-        lateral_offset: Lateral offset from lane center (for logging)
+        lateral_offset: Lateral offset from lane center (normalized, for logging)
         heading_angle: Heading angle relative to lane (for logging)
+        lane_width_pixels: Lane width in pixels (for logging/metrics)
+        departure_status: Lane departure status string (for logging/metrics)
     """
     steering: float = 0.0
     throttle: float = 0.0
     brake: float = 0.0
     mode: ControlMode = ControlMode.LANE_KEEPING
 
-    # Diagnostic info (not used for control)
-    lateral_offset: float | None = None
+    # Diagnostic info (not used for control, broadcasted to viewer for metrics)
+    lateral_offset: float | None = None  # Normalized offset [-1, 1]
+    lateral_offset_meters: float | None = None  # Offset in meters
     heading_angle: float | None = None
+    lane_width_pixels: float | None = None
+    departure_status: str | None = None
 
     def clamp_values(self):
         """Ensure all control values are within valid ranges."""

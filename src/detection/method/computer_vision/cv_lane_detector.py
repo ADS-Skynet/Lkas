@@ -86,6 +86,26 @@ class CVLaneDetector(LaneDetector):
         self.hough_max_line_gap = hough_max_line_gap
         self.smoothing_factor = smoothing_factor
 
+        # ROI parameters (fractions of image dimensions)
+        # Store these so they can be updated at runtime
+        if config:
+            self.roi_bottom_left_x = config.roi_bottom_left_x
+            self.roi_top_left_x = config.roi_top_left_x
+            self.roi_top_right_x = config.roi_top_right_x
+            self.roi_bottom_right_x = config.roi_bottom_right_x
+            self.roi_top_y = config.roi_top_y
+        else:
+            # Default values matching _get_default_roi
+            self.roi_bottom_left_x = 0.05
+            self.roi_top_left_x = 0.35
+            self.roi_top_right_x = 0.65
+            self.roi_bottom_right_x = 0.95
+            self.roi_top_y = 0.5
+
+        # Image dimensions (needed to recalculate ROI when parameters change)
+        self.image_width = None
+        self.image_height = None
+
         # Lane tracking state
         self.prev_left_lane: Lane | None = None  # Type hint: Lane | None
         self.prev_right_lane: Lane | None = None
@@ -119,9 +139,10 @@ class CVLaneDetector(LaneDetector):
         # Edge detection
         edges = self._detect_edges(preprocessed)
 
-        # Apply ROI
-        roi_vertices = self.roi_vertices if self.roi_vertices else self._get_default_roi((height, width))
-        roi_edges = self._region_of_interest(edges, roi_vertices)
+        # Apply ROI (generate vertices once on first frame, then reuse)
+        if self.roi_vertices is None:
+            self.roi_vertices = self._get_default_roi((height, width))
+        roi_edges = self._region_of_interest(edges, self.roi_vertices)
 
         # Detect lines
         lines = self._detect_lines(roi_edges)
@@ -151,17 +172,15 @@ class CVLaneDetector(LaneDetector):
         self.prev_left_lane = left_lane
         self.prev_right_lane = right_lane
 
-        # Create debug image
-        debug_image = self._create_debug_image(image, left_lane, right_lane, roi_vertices)
-
         # Calculate processing time
         processing_time_ms = (time.time() - start_time) * 1000
 
         # Return DetectionResult object (NEW: type-safe structure!)
+        # Note: No debug_image - viewer handles all overlays on laptop side
         return DetectionResult(
             left_lane=left_lane,
             right_lane=right_lane,
-            debug_image=debug_image,
+            debug_image=None,  # Viewer draws overlays, not LKAS
             processing_time_ms=processing_time_ms
         )
 
@@ -215,6 +234,11 @@ class CVLaneDetector(LaneDetector):
         Returns:
             True if parameter was updated successfully, False otherwise
         """
+        # Handle special 'reset' parameter
+        if param_name == 'reset':
+            self.reset_smoothing()
+            return True
+
         # Map of valid parameters and their value constraints
         valid_params = {
             'canny_low': (1, 255),
@@ -223,6 +247,11 @@ class CVLaneDetector(LaneDetector):
             'hough_min_line_len': (1, 200),
             'hough_max_line_gap': (1, 300),
             'smoothing_factor': (0.0, 1.0),
+            'roi_bottom_left_x': (0.0, 0.5),
+            'roi_top_left_x': (0.0, 0.5),
+            'roi_top_right_x': (0.5, 1.0),
+            'roi_bottom_right_x': (0.5, 1.0),
+            'roi_top_y': (0.0, 1.0),
         }
 
         if param_name not in valid_params:
@@ -248,9 +277,28 @@ class CVLaneDetector(LaneDetector):
             self.hough_max_line_gap = int(value)
         elif param_name == 'smoothing_factor':
             self.smoothing_factor = float(value)
+        elif param_name == 'roi_bottom_left_x':
+            self.roi_bottom_left_x = float(value)
+            self._recalculate_roi()
+        elif param_name == 'roi_top_left_x':
+            self.roi_top_left_x = float(value)
+            self._recalculate_roi()
+        elif param_name == 'roi_top_right_x':
+            self.roi_top_right_x = float(value)
+            self._recalculate_roi()
+        elif param_name == 'roi_bottom_right_x':
+            self.roi_bottom_right_x = float(value)
+            self._recalculate_roi()
+        elif param_name == 'roi_top_y':
+            self.roi_top_y = float(value)
+            self._recalculate_roi()
 
-        print(f"✓ Updated {param_name} = {value}")
         return True
+
+    def _recalculate_roi(self):
+        """Recalculate ROI vertices when ROI parameters change."""
+        if self.image_width is not None and self.image_height is not None:
+            self.roi_vertices = self._get_default_roi((self.image_height, self.image_width))
 
     # =========================================================================
     # PRIVATE HELPER METHODS
@@ -259,13 +307,19 @@ class CVLaneDetector(LaneDetector):
     # =========================================================================
 
     def _get_default_roi(self, image_shape: Tuple[int, int]) -> np.ndarray:
-        """Get default ROI based on image shape (broader detection area)."""
+        """Get default ROI based on image shape and current ROI parameters."""
         height, width = image_shape
+
+        # Store dimensions for future ROI recalculations
+        self.image_width = width
+        self.image_height = height
+
+        # Use instance variables for ROI parameters (can be updated at runtime)
         vertices = np.array([[
-            (int(width * 0.05), height),           # Bottom-left (wider)
-            (int(width * 0.35), int(height * 0.5)),  # Top-left (wider, looks further)
-            (int(width * 0.65), int(height * 0.5)),  # Top-right (wider, looks further)
-            (int(width * 0.95), height)            # Bottom-right (wider)
+            (int(width * self.roi_bottom_left_x), height),           # Bottom-left
+            (int(width * self.roi_top_left_x), int(height * self.roi_top_y)),  # Top-left
+            (int(width * self.roi_top_right_x), int(height * self.roi_top_y)),  # Top-right
+            (int(width * self.roi_bottom_right_x), height)            # Bottom-right
         ]], dtype=np.int32)
         return vertices
 
