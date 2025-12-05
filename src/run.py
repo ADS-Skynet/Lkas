@@ -48,18 +48,18 @@ class LKASLauncher:
         verbose: bool = False,
         broadcast: bool = False,
         # Process configuration
-        retry_count: int = None,
-        retry_delay: float = None,
-        decision_init_timeout: float = None,
-        detection_init_timeout: float = None,
-        process_stop_timeout: float = None,
+        retry_count: int | None = None,
+        retry_delay: float | None = None,
+        decision_init_timeout: float | None = None,
+        detection_init_timeout: float | None = None,
+        process_stop_timeout: float | None = None,
         # Terminal configuration
-        terminal_width: int = None,
-        log_file: str = None,
-        enable_footer: bool = None,
+        terminal_width: int | None = None,
+        log_file: str | None = None,
+        enable_footer: bool | None = None,
         # Broadcasting configuration
-        jpeg_quality: int = None,
-        broadcast_log_interval: int = None,
+        jpeg_quality: int | None = None,
+        broadcast_log_interval: int | None = None,
     ):
         """
         Initialize LKAS launcher.

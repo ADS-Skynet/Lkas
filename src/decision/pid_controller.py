@@ -31,18 +31,22 @@ class PIDController:
         self.kp, self.ki, self.kd - Instance variables (gains stored per instance)
     """
 
-    def __init__(self, kp: float = 0.5, ki: float = 0.01, kd: float = 0.1):
+    def __init__(self, kp: float = 0.5, ki: float = 0.01, kd: float = 0.1, dt: float = 0.1):
         """
         Initialize PID controller.
 
         Args:
             kp: Proportional gain (how much to react to lateral offset)
             ki: Integral gain (how much to accumulate the error over time)
-            kd: Derivative gain (how much to react to rate of change of error)
+            kd: Derivative gain (how much to react to heading angle)
         """
         self.kp = kp  # Proportional gain
         self.ki = ki  # Integral gain
         self.kd = kd  # Derivative gain
+        self.dt = dt  # Time step for integral and derivative calculations
+        # CORRECTED VERSION: Remove dt parameter entirely as it's unused
+        # def __init__(self, kp: float = 0.5, ki: float = 0.01, kd: float = 0.1):
+        # Remove: self.dt = dt
 
         # State tracking for derivative and integral terms
         self.prev_error = 0.0
@@ -54,24 +58,14 @@ class PIDController:
                image_width: int) -> float | None:
         """
         Update the PID controller with the current error and return the control signal.
+        Deprecated method - use compute_steering instead.
+        It's in here for archiving purposes.
 
-        Alternative implementation that directly takes lane objects instead of LaneMetrics.
-
-        Args:
-            left_lane: Left lane boundary
-            right_lane: Right lane boundary
-            image_width: Width of the image in pixels
-
-        Returns:
-            Control signal (steering adjustment) or None if lanes are missing
+        error: The current error (offset_normalized)
         """
         # Calculate lateral offset
         if not left_lane or not right_lane:
             return None
-
-        # Get current time for time delta calculation
-        current_time = time.time()
-        dt = current_time - self.prev_time
 
         # Calculate lane center at bottom of image
         lane_center_x = (left_lane.x1 + right_lane.x1) / 2.0
@@ -92,15 +86,24 @@ class PIDController:
         p_term = self.kp * error
 
         # Integral term
-        self.integral += error * dt
+        # ISSUE: Uses fixed self.dt instead of actual time delta
+        self.integral += error * self.dt
+        # CORRECTED VERSION:
+        # current_time = time.time()
+        # dt = current_time - self.prev_time
+        # self.integral += error * dt
         i_term = self.ki * self.integral
 
         # Derivative term
-        d_term = self.kd * (error - self.prev_error) / dt
+        # ISSUE: Uses fixed self.dt instead of actual time delta
+        d_term = self.kd * (error - self.prev_error) / self.dt
+        # CORRECTED VERSION:
+        # d_term = self.kd * (error - self.prev_error) / dt
 
-        # Update previous error and time
+        # Update previous error
         self.prev_error = error
-        self.prev_time = current_time
+        # CORRECTED VERSION: Also update time
+        # self.prev_time = current_time
 
         # Total control signal (steering adjustment)
         control_signal = p_term + i_term + d_term
@@ -147,11 +150,26 @@ class PIDController:
         self.integral += p_term * dt
         i_term = self.ki * self.integral
 
-        # Derivative term: rate of change of error
+        # Derivative term: heading angle
         error = p_term
-        d_term = self.kd * (error - self.prev_error) / dt
+        # ISSUE 1: Duplicate assignment - d_term set to 0.0 then immediately overwritten
+        d_term = 0.0
+        # ISSUE 2: Uses fixed self.dt instead of calculated dt variable
+        d_term = self.kd * (error - self.prev_error) / self.dt
+        # CORRECTED VERSION:
+        # d_term = self.kd * (error - self.prev_error) / dt
+
+        # d_term = max(-1.0, min(1.0, d_term))  # Clamp to [-1, 1]
         # Update previous error
         self.prev_error = error
+
+        # ISSUE 3: Commented-out alternative derivative implementation - should be removed
+        # d_term = 0.0
+        # if metrics.heading_angle_deg is not None:
+        #    max_heading = 30.0  # Max heading to normalize angle
+        #    d_term = metrics.heading_angle_deg / max_heading
+        #    d_term = max(-1.0, min(1.0, d_term))  # Clamp to [-1, 1]
+        # d_term *= self.kd
 
         # PID control law
         steering = -((self.kp * p_term) + i_term + d_term)
@@ -159,7 +177,10 @@ class PIDController:
         # Clamp steering to valid range [-1, 1]
         steering = max(-1.0, min(1.0, steering))
 
-        # Update time for the next iteration
+        # Update previous error and time for the next iteration
+        # ISSUE 4: Redundant assignment - self.prev_error already set above on line 158
+        self.prev_error = p_term
+        # CORRECTED VERSION: Remove the line above
         self.prev_time = current_time
 
         return steering
@@ -263,6 +284,9 @@ if __name__ == "__main__":
     print(f"\nTest 1 (left of center): Steering = {steering1:.3f}")
 
     # Test case: Vehicle right of center
+    # ISSUE: Incomplete line - will cause runtime error
+    metrics2 = Lane
+    # CORRECTED VERSION: Remove the line above
     metrics2 = LaneMetrics(
         lateral_offset_normalized=-0.2,  # 20% right of center
         heading_angle_deg=-3.0,          # Pointing 3° right
