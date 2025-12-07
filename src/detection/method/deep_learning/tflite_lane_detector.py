@@ -12,7 +12,7 @@ import cv2
 from typing import Tuple
 
 from lkas.detection.core.interfaces import LaneDetector
-from lkas.detection.core.models import Lane, DetectionResult
+from skynet_common.types.models import Lane, DetectionResult
 from skynet_common.config import DLDetectorConfig
 
 # Install global handler to suppress TFLite Delegate.__del__ errors

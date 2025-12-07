@@ -10,10 +10,11 @@ For C++ developers:
     Formula: output = Kp * error + Kd * derivative(error)
 """
 
-from lkas.detection.core.models import LaneMetrics, Lane
+from skynet_common.types.models import LaneMetrics, Lane
+from lkas.decision.core.interfaces import SteeringController
 
 
-class PDController:
+class PDController(SteeringController):
     """
     PD (Proportional-Derivative) controller for steering correction.
 
@@ -172,6 +173,55 @@ class PDController:
         """
         return (self.kp, self.kd)
 
+    def get_name(self) -> str:
+        """
+        Return the name of this controller.
+
+        Returns:
+            Controller name
+        """
+        return "PD Controller"
+
+    def get_parameters(self) -> dict:
+        """
+        Return current controller parameters as dict.
+
+        Returns:
+            Dictionary of parameter names and values
+        """
+        return {
+            "kp": self.kp,
+            "kd": self.kd,
+        }
+
+    def update_parameter(self, name: str, value: float) -> bool:
+        """
+        Update a single controller parameter.
+
+        Args:
+            name: Parameter name ('kp' or 'kd')
+            value: New parameter value
+
+        Returns:
+            True if parameter was updated successfully, False otherwise
+        """
+        if name == "kp":
+            self.kp = float(value)
+            return True
+        elif name == "kd":
+            self.kd = float(value)
+            return True
+        return False
+
+    def get_state(self) -> dict:
+        """
+        Get current internal state of the controller.
+
+        Returns:
+            Dictionary of state variables (empty for stateless PD)
+        """
+        return {}  # PD controller is stateless
+
 
 # =============================================================================
 # PD CONTROL EXPLANATION (for those new to control theory)
@@ -225,7 +275,7 @@ if __name__ == "__main__":
     # Example usage
     print("Testing PDController...")
 
-    from lkas.detection.core.models import LaneMetrics, LaneDepartureStatus
+    from skynet_common.types.models import LaneMetrics, LaneDepartureStatus
 
     # Create controller
     controller = PDController(kp=0.5, kd=0.1)

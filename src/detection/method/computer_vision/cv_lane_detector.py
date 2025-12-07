@@ -20,7 +20,7 @@ import time
 from typing import Tuple, List
 
 from lkas.detection.core.interfaces import LaneDetector  # ABC = Abstract Base Class
-from lkas.detection.core.models import Lane, DetectionResult  # Type-safe data models
+from skynet_common.types.models import Lane, DetectionResult  # Type-safe data models
 from skynet_common.config import CVDetectorConfig  # Configuration
 
 

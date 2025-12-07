@@ -259,23 +259,22 @@ The viewer provides real-time parameter adjustment via WebSocket:
 
 ### Adding a New Detection Method
 
-1. Create detector class in `detection/<method>/`:
+1. Create detector class in `detection/method/<method>/`:
 ```python
-from detection.core.detector import LaneDetector
+from lkas.detection.core.base import BaseDetector
 
-class MyDetector(LaneDetector):
+class MyDetector(BaseDetector):
     def detect(self, image):
         # Implement detection logic
         return left_lane, right_lane
 ```
 
-2. Register in `detection/core/detector.py`:
+2. Register in `detection/core/factory.py`:
 ```python
-DETECTORS = {
-    'cv': CVDetector,
-    'yolo': YOLODetector,
-    'my_method': MyDetector,
-}
+# Add to DetectorFactory.create() method
+if method == 'my_method':
+    from lkas.detection.method.my_method import MyDetector
+    return MyDetector(self.config)
 ```
 
 3. Use it:
