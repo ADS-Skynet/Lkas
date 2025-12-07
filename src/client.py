@@ -11,10 +11,10 @@ from typing import Optional
 import numpy as np
 from lkas.detection import DetectionClient
 from lkas.decision import DecisionClient
-from lkas.integration.messages import DetectionMessage, ControlMessage
+from lkas.integration.shared_memory.messages import DetectionMessage, ControlMessage
 
 
-class LKAS:
+class LKASClient:
     """
     Complete Lane Keeping Assist System.
 
@@ -24,7 +24,7 @@ class LKAS:
     Usage:
         # Make sure LKAS servers are running first (they create the shared memory)
         # Then initialize LKAS client
-        lkas = LKAS(
+        lkas = LKASClient(
             image_shm_name="camera_feed",
             detection_shm_name="detection_results",
             control_shm_name="control_commands",
@@ -150,7 +150,7 @@ class LKASSimple:
         image_shape: tuple = (600, 800, 3)
     ):
         """Initialize simplified LKAS with default settings."""
-        self._lkas = LKAS(
+        self._lkas = LKASClient(
             image_shm_name=image_shm_name,
             detection_shm_name=detection_shm_name,
             control_shm_name=control_shm_name,

@@ -6,8 +6,7 @@ Defines contracts that all implementations must follow.
 
 from abc import ABC, abstractmethod
 import numpy as np
-
-from .models import Lane, DetectionResult
+from typing import Any
 
 
 class LaneDetector(ABC):
@@ -19,7 +18,7 @@ class LaneDetector(ABC):
     """
 
     @abstractmethod
-    def detect(self, image: np.ndarray) -> DetectionResult:
+    def detect(self, image: np.ndarray) -> Any:
         """
         Detect lanes in the given image.
 
@@ -27,7 +26,7 @@ class LaneDetector(ABC):
             image: RGB input image as numpy array (H, W, 3)
 
         Returns:
-            DetectionResult containing:
+            Detection result containing:
                 - left_lane: Left lane line or None
                 - right_lane: Right lane line or None
                 - debug_image: Visualization for debugging

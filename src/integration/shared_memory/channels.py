@@ -45,7 +45,7 @@ from typing import Optional
 from multiprocessing import shared_memory, Lock, Value, resource_tracker
 import struct
 
-from lkas.integration.messages import ImageMessage, DetectionMessage, LaneMessage
+from .messages import ImageMessage, DetectionMessage, LaneMessage
 
 
 # =============================================================================
@@ -233,14 +233,14 @@ class SharedMemoryImageChannel:
                 size=self.total_size,
                 name=name
             )
-            print(f"✓ Created shared memory: {name} ({self.total_size} bytes)")
+            print(f"✓ Created image shared memory: {name} ({self.total_size} bytes)")
         else:
             # Reader mode: Retry connection if not yet created
             self.shm = None
             for attempt in range(retry_count):
                 try:
                     self.shm = shared_memory.SharedMemory(name=name)
-                    print(f"\n✓ Connected to shared memory: {name}                    ")
+                    # print(f"\n✓ Connected to image shared memory: {name}")
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
@@ -466,7 +466,7 @@ class SharedMemoryDetectionChannel:
             for attempt in range(retry_count):
                 try:
                     self.shm = shared_memory.SharedMemory(name=name)
-                    print(f"\r✓ Connected to detection shared memory: {name}                    ")
+                    # print(f"\r✓ Connected to detection shared memory: {name}")
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
@@ -664,7 +664,7 @@ from dataclasses import dataclass
 from typing import Optional
 from multiprocessing import shared_memory, Lock, resource_tracker
 
-from lkas.integration.messages import ControlMessage, ControlMode
+from .messages import ControlMessage, ControlMode
 
 
 # =============================================================================
@@ -916,7 +916,7 @@ class SharedMemoryControlChannel:
             for attempt in range(retry_count):
                 try:
                     self.shm = shared_memory.SharedMemory(name=name)
-                    print(f"\r✓ Connected to control shared memory: {name}                    ")
+                    # print(f"\r✓ Connected to control shared memory: {name}")
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:

@@ -14,7 +14,7 @@ Architecture:
 
 from typing import Optional
 from lkas.integration.shared_memory import SharedMemoryControlChannel
-from lkas.integration.messages import ControlMessage
+from lkas.integration.shared_memory.messages import ControlMessage
 
 
 class DecisionClient:

@@ -4,8 +4,8 @@ Factory pattern for creating lane detectors.
 Centralizes detector instantiation and configuration.
 """
 
+from typing import Any
 from .interfaces import LaneDetector
-from .config import Config
 
 
 class DetectorFactory:
@@ -17,7 +17,7 @@ class DetectorFactory:
         detector = factory.create('cv')
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Any):
         """
         Initialize factory with configuration.
 

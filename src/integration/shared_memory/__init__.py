@@ -9,9 +9,25 @@ from .channels import (
     SharedMemoryDetectionChannel,
     SharedMemoryControlChannel,
 )
+from .messages import (
+    ImageMessage,
+    DetectionMessage,
+    LaneMessage,
+    ControlMessage,
+    ControlMode,
+    SystemStatus,
+    PerformanceMetrics,
+)
 
 __all__ = [
     'SharedMemoryImageChannel',
     'SharedMemoryDetectionChannel',
     'SharedMemoryControlChannel',
+    'ImageMessage',
+    'DetectionMessage',
+    'LaneMessage',
+    'ControlMessage',
+    'ControlMode',
+    'SystemStatus',
+    'PerformanceMetrics',
 ]

@@ -167,7 +167,7 @@ Neural network-based approach using PyTorch:
 ### Basic Usage
 
 ```python
-from lkas.detection.core.config import ConfigManager
+from skynet_common.config import ConfigManager
 from lkas.detection.core.factory import DetectorFactory
 
 # Load configuration
@@ -216,7 +216,7 @@ Server features:
 
 ```python
 from lkas.detection import DetectionClient
-from lkas.detection.core.config import ConfigManager
+from skynet_common.config import ConfigManager
 
 # Initialize client
 config = ConfigManager.load('config.yaml')
@@ -236,7 +236,7 @@ if detection_msg:
 
 ```python
 from lkas.detection import LaneDetection
-from lkas.detection.core.config import ConfigManager
+from skynet_common.config import ConfigManager
 
 # Initialize detector
 config = ConfigManager.load('config.yaml')
@@ -288,7 +288,7 @@ dl_detector:
 
 ```python
 from lkas.detection.core.interfaces import LaneDetector
-from lkas.detection.core.models import DetectionResult
+from skynet_common.types.models import DetectionResult
 
 class MyCustomDetector(LaneDetector):
     def detect(self, image: np.ndarray) -> DetectionResult:

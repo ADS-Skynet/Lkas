@@ -12,7 +12,7 @@ import numpy as np
 from typing import Tuple
 
 from lkas.detection.core.interfaces import LaneDetector
-from lkas.detection.core.models import Lane, DetectionResult
+from skynet_common.types.models import Lane, DetectionResult
 from skynet_common.config import DLDetectorConfig
 
 # Import the base DL detector implementation
