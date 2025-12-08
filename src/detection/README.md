@@ -1,19 +1,20 @@
-# Lane Detection Module
+# Detection Module
 
-A modular lane detection system supporting both Computer Vision (CV) and Deep Learning (DL) approaches for lane keeping assist in autonomous driving applications.
+**Lane detection for autonomous driving using Computer Vision and Deep Learning.**
 
 ## Overview
 
-This module provides a flexible, extensible framework for detecting lane markings in road images. It's designed to work with CARLA simulator and PiRacer hardware platforms as part of a larger lane keeping assist system.
+The Detection module provides a flexible, extensible framework for detecting lane markings in road images. It supports both classical Computer Vision (Canny + Hough) and Deep Learning (PyTorch) approaches, with a clean plugin architecture for adding new methods.
 
 ### Key Features
 
-- **Multiple Detection Methods**: Switch between Computer Vision and Deep Learning approaches
-- **Plug-and-Play Architecture**: Easy to add new detection algorithms
-- **Type-Safe Configuration**: YAML-based config with dataclass validation
-- **Distributed Processing**: Run detection on separate machines (e.g., GPU server)
-- **Real-time Performance**: Optimized for live video processing
-- **Comprehensive Metrics**: Lane position, heading angle, departure warnings
+- **Multiple Detection Methods**: Switch between CV and DL approaches
+- **Plug-and-Play Architecture**: Easy to add new detection algorithms via factory pattern
+- **Type-Safe Design**: Dataclass-based configuration and message protocols
+- **Distributed Processing**: Run detection as separate process/service
+- **Real-time Performance**: Optimized for 30+ FPS live video processing
+- **Shared Memory IPC**: Ultra-low latency communication (<0.01ms)
+- **ZMQ Parameter Updates**: Live tuning without restart
 
 ## Architecture
 
@@ -42,14 +43,16 @@ detection/
 
 ## Core Components
 
-### 1. Data Models ([core/models.py](core/models.py))
+### 1. Data Models
 
-**Lane**
+**Lane** (from `skynet_common.types.models`)
 ```python
 @dataclass
 class Lane:
-    x1, y1: int  # Start point (bottom)
-    x2, y2: int  # End point (top)
+    x1: int  # Start point X (bottom of image)
+    y1: int  # Start point Y (bottom of image)
+    x2: int  # End point X (top of region)
+    y2: int  # End point Y (top of region)
     confidence: float = 1.0
 
     # Computed properties
@@ -57,7 +60,7 @@ class Lane:
     length: float
 ```
 
-**DetectionResult**
+**DetectionResult** (from `skynet_common.types.models`)
 ```python
 @dataclass
 class DetectionResult:
@@ -65,65 +68,98 @@ class DetectionResult:
     right_lane: Lane | None
     debug_image: np.ndarray | None
     processing_time_ms: float
+    has_both_lanes: bool
 ```
 
-**LaneMetrics**
-- Lateral offset (pixels, meters, normalized)
-- Heading angle
-- Departure status (CENTERED, DRIFT, DEPARTURE)
-- Lane width measurements
+**DetectionMessage** (from `lkas.integration.shared_memory.messages`)
+```python
+@dataclass
+class DetectionMessage:
+    left_lane: LaneMessage | None
+    right_lane: LaneMessage | None
+    frame_id: int
+    timestamp: float
+    processing_time_ms: float
+```
 
 ### 2. Detector Interface ([core/interfaces.py](core/interfaces.py))
 
 All detectors implement the `LaneDetector` abstract base class:
 
 ```python
+from abc import ABC, abstractmethod
+from skynet_common.types.models import DetectionResult
+
 class LaneDetector(ABC):
     @abstractmethod
     def detect(self, image: np.ndarray) -> DetectionResult:
-        """Detect lanes in RGB image."""
+        """
+        Detect lanes in RGB image.
+
+        Args:
+            image: RGB image array (H, W, 3)
+
+        Returns:
+            DetectionResult with left_lane, right_lane, and processing time
+        """
         pass
 
     @abstractmethod
     def get_name(self) -> str:
-        """Return detector name."""
+        """Return detector name (e.g., 'CV Lane Detector')."""
         pass
 
     @abstractmethod
     def get_parameters(self) -> dict:
-        """Return current parameters."""
+        """Return current detector parameters as dict."""
+        pass
+
+    @abstractmethod
+    def update_parameter(self, name: str, value: float) -> bool:
+        """
+        Update a detector parameter in real-time.
+
+        Args:
+            name: Parameter name (e.g., 'canny_low', 'hough_threshold')
+            value: New parameter value
+
+        Returns:
+            True if parameter was updated, False otherwise
+        """
         pass
 ```
 
-### 3. Configuration System ([core/config.py](core/config.py))
+### 3. Configuration Management
 
-Type-safe configuration using Python dataclasses:
+Configuration is loaded from the project-wide `config.yaml` file:
 
 ```python
-@dataclass
-class Config:
-    carla: CARLAConfig
-    camera: CameraConfig
-    cv_detector: CVDetectorConfig
-    dl_detector: DLDetectorConfig
-    analyzer: AnalyzerConfig
-    controller: ControllerConfig
-    visualization: VisualizationConfig
-    detection_method: str = "cv"  # 'cv' or 'dl'
-```
+from skynet_common.config import ConfigManager
 
-Load from YAML:
-```python
+# Load configuration
 config = ConfigManager.load('config.yaml')
+
+# Access detection config
+detection_config = config.detection
+cv_params = detection_config.cv_params
 ```
+
+Configuration is validated at load time using dataclasses with type hints.
 
 ### 4. Factory Pattern ([core/factory.py](core/factory.py))
 
-Centralized detector creation:
+Centralized detector creation with method selection:
 
 ```python
+from lkas.detection.core.factory import DetectorFactory
+
+# Create factory
 factory = DetectorFactory(config)
-detector = factory.create('cv')  # or 'dl'
+
+# Create detector by method
+detector = factory.create('cv')  # Computer Vision
+# or
+detector = factory.create('dl')  # Deep Learning
 
 # Override config parameters
 detector = factory.create('cv', canny_low=40, canny_high=120)
@@ -251,33 +287,37 @@ if result.has_both_lanes:
 ## Configuration Example
 
 ```yaml
-# Detection method selection
-detection_method: cv  # 'cv' or 'dl'
+detection:
+  method: cv  # 'cv' or 'dl'
 
-# Computer Vision parameters
-lane_detection:
-  cv_params:
+  # Computer Vision parameters
+  cv:
+    # Edge detection
     canny_low: 50
     canny_high: 150
+
+    # Line detection
     hough_threshold: 50
     hough_min_line_len: 40
     hough_max_line_gap: 100
+
+    # Processing
     smoothing_factor: 0.7
     min_slope: 0.5
 
-    # ROI (fraction of image)
-    roi_bottom_left_x: 0.1
-    roi_top_left_x: 0.45
-    roi_top_right_x: 0.55
-    roi_bottom_right_x: 0.9
-    roi_top_y: 0.6
+  # Region of Interest (fraction of image)
+  roi:
+    top_trim: 0.55     # Ignore top 55%
+    bottom_trim: 0.1   # Ignore bottom 10%
+    side_trim: 0.1     # Ignore sides 10%
 
-# Deep Learning parameters
-dl_detector:
-  model_type: pretrained
-  input_size: [256, 256]
-  threshold: 0.5
-  device: auto  # 'cpu', 'cuda', or 'auto'
+  # Deep Learning parameters
+  dl:
+    model_path: "models/lane_detector.pth"
+    model_type: pretrained
+    input_size: [256, 256]
+    threshold: 0.5
+    device: auto  # 'cpu', 'cuda', or 'auto'
 ```
 
 ## Extending the Module
@@ -328,8 +368,9 @@ def create(self, detector_type: str | None = None) -> LaneDetector:
 
 ## Related Modules
 
-- **simulation/**: CARLA integration and vehicle control
-- **decision/**: Lane analysis and control algorithms
+- **decision/**: Steering control and lane analysis
+- **integration/**: Shared memory and ZMQ communication
+- **simulation/**: CARLA integration and vehicle platform
 
 ## Design Principles
 
@@ -340,6 +381,35 @@ def create(self, detector_type: str | None = None) -> LaneDetector:
 5. **Type Safety**: Dataclasses with type hints throughout
 6. **Testability**: Modular design enables unit testing
 
+## Troubleshooting
+
+### Poor lane detection quality
+- **Adjust Canny thresholds:** Lower for more edges, higher for fewer
+  - `canny_low`: 30-70 (default: 50)
+  - `canny_high`: 100-200 (default: 150)
+- **Tune Hough parameters:**
+  - `hough_threshold`: Lower to detect more lines (default: 50)
+  - `hough_min_line_len`: Minimum line length in pixels (default: 40)
+- **Modify ROI:** Focus on lane area, exclude irrelevant regions
+- **Increase smoothing:** Higher `smoothing_factor` for stability (0.0-1.0)
+
+### Detection too slow
+- **Use CV method:** 3-5x faster than DL (5-15ms vs 15-30ms)
+- **Reduce image size:** Smaller input = faster processing
+- **Optimize ROI:** Smaller region = less processing
+- **For DL:** Use GPU, TensorRT optimization, or lighter model
+
+### Flickering/unstable lanes
+- **Increase smoothing_factor:** Smooth across frames (0.7-0.9)
+- **Check lighting:** Poor lighting affects CV methods
+- **Verify lane visibility:** Detection needs clear lane markings
+
+### No lanes detected
+- **Check camera feed:** Ensure image is valid RGB
+- **Verify ROI settings:** Make sure lane area is included
+- **Lower thresholds:** More lenient detection parameters
+- **Check lane markers:** Detection requires visible lane lines
+
 ## Version
 
-Current version: 0.1.0 (see [__init__.py](__init__.py))
+Current version: 0.1.0 (see [\_\_init\_\_.py](__init__.py))

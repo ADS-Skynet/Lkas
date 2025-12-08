@@ -1,327 +1,254 @@
-# Terminal Display Architecture
+# LKAS Server Architecture (Refactored)
 
-## Visual Layout
+## Component Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    TERMINAL WINDOW                                   │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  [LKAS] Starting detection server...                                │
-│  [DETECTION] Loading configuration...                               │
-│  [DETECTION] ✓ Configuration loaded                                 │
-│  [DETECTION] ✓ Detector ready                                       │
-│                                                                       │
-│  [LKAS] Starting decision server...                                 │
-│  [DECISION ] Loading configuration...                               │
-│  [DECISION ] ✓ Configuration loaded                                 │
-│  [DECISION ] ✓ Controller ready                                     │
-│                                                                       │
-│  [LKAS] System running - Press Ctrl+C to stop                       │
-│  ═════════════════════════════════════════════════════════════      │
-│                                                                       │
-│  [LKAS] Checkpoint: Processed 150 frames                            │
-│  [DETECTION] Model confidence: 0.96                                 │
-│                                                                       │
-│                    ▲                                                 │
-│                    │                                                 │
-│              SCROLLING AREA                                          │
-│         (Main log messages)                                          │
-│                    │                                                 │
-│                    ▼                                                 │
-│                                                                       │
-├─────────────────────────────────────────────────────────────────────┤
-│  [DET] 30.2 FPS | Frame 1234 | 15.20ms | [DEC] 30.5 FPS | +0.125   │  ◄── PERSISTENT FOOTER
-└─────────────────────────────────────────────────────────────────────┘   (Always at bottom)
-                                                                           (Updates in-place)
+┌─────────────────────────────────────────────────────────────┐
+│                        LKASServer                            │
+│                     (Orchestrator)                           │
+│                                                              │
+│  Responsibilities:                                           │
+│  • Configuration management                                  │
+│  • Lifecycle orchestration                                   │
+│  • Signal handling                                           │
+│  • Terminal display coordination                             │
+└────┬──────────────────────┬──────────────────────┬──────────┘
+     │                      │                      │
+     │                      │                      │
+     ▼                      ▼                      ▼
+┌──────────┐      ┌──────────────┐      ┌─────────────────┐
+│Detection │      │  Decision    │      │   Broadcast     │
+│Process   │      │  Process     │      │   Manager       │
+│Manager   │      │  Manager     │      │   (Optional)    │
+└────┬─────┘      └──────┬───────┘      └────────┬────────┘
+     │                   │                       │
+     │extends            │extends                │uses
+     │                   │                       │
+     ▼                   ▼                       │
+┌────────────────────────────────────┐          │
+│      ProcessManager (ABC)          │          │
+│                                    │          │
+│  Methods:                          │          │
+│  • launch()                        │          │
+│  • read_output()                   │          │
+│  • is_alive()                      │          │
+│  • stop()                          │          │
+│                                    │          │
+│  Abstract:                         │          │
+│  • build_command()                 │          │
+│  • get_process_name()              │          │
+│  • check_initialization_marker()   │          │
+└────────────────────────────────────┘          │
+                                                 │
+                                                 ▼
+                                    ┌────────────────────────┐
+                                    │  ZMQ Broker           │
+                                    │  Shared Memory        │
+                                    │  - Image Channel      │
+                                    │  - Detection Channel  │
+                                    │  - Control Channel    │
+                                    └────────────────────────┘
 ```
 
 ## Data Flow
 
 ```
-┌─────────────────┐         ┌─────────────────┐
-│   Detection     │         │    Decision     │
-│   Process       │         │    Process      │
-└────────┬────────┘         └────────┬────────┘
-         │                           │
-         │ stdout                    │ stdout
-         │                           │
-         ▼                           ▼
-    ┌────────────────────────────────────┐
-    │      LKASLauncher.run()            │
-    │                                    │
-    │  _read_process_output()            │
-    │         │                          │
-    │         ├── Regular messages ─────►│
-    │         │   (scroll)               │
-    │         │                          │
-    │         └── FPS stats ─────►       │
-    │             (footer)               │
-    │                                    │
-    │  ┌──────────────────────────────┐ │
-    │  │    TerminalDisplay           │ │
-    │  │                              │ │
-    │  │  • print() → scrolling      │ │
-    │  │  • update_footer() → bottom │ │
-    │  └──────────────────────────────┘ │
-    └────────────────────────────────────┘
+┌──────────────┐
+│ Simulation   │
+│  (External)  │
+└──────┬───────┘
+       │ camera_feed
+       │ (SharedMemory)
+       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Detection Server                        │
+│                  (Subprocess via Manager)                    │
+│                                                              │
+│  DetectionProcessManager launches:                           │
+│  python -m lkas.detection.run --method cv ...                │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ detection_results
+                               │ (SharedMemory)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Decision Server                         │
+│                  (Subprocess via Manager)                    │
+│                                                              │
+│  DecisionProcessManager launches:                            │
+│  python -m lkas.decision.run ...                             │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ control_commands
+                               │ (SharedMemory)
+                               ▼
+                        ┌──────────────┐
+                        │  Simulation  │
+                        │  (External)  │
+                        └──────────────┘
+
+Optional Broadcasting:
+─────────────────────
+BroadcastManager reads from SharedMemory:
+  • camera_feed → broadcasts frames via ZMQ
+  • detection_results + control_commands → broadcasts detection + metrics
+
+  Viewers (remote) connect to ZMQ and receive:
+  • Live camera frames (JPEG or raw RGB)
+  • Lane detection results
+  • Control metrics (offset, heading, etc.)
 ```
 
-## Initialization Flow (Ordered)
+## Sequence Diagram: Server Startup
 
 ```
-Time ───────────────────────────────────────────────►
-
-LKAS Launcher:
-  │
-  ├─► Start Detection Process
-  │
-  ├─► Buffer Detection Output (5 sec)
-  │   ┌────────────────────────┐
-  │   │ OrderedLogger (DET)    │
-  │   │  • log("Loading...")   │
-  │   │  • log("✓ Loaded")     │
-  │   │  • log("✓ Ready")      │
-  │   └────────────────────────┘
-  │
-  ├─► Flush Detection Buffer
-  │       ↓
-  │   [DETECTION] Loading...
-  │   [DETECTION] ✓ Loaded
-  │   [DETECTION] ✓ Ready
-  │
-  ├─► Start Decision Process
-  │
-  ├─► Buffer Decision Output (3 sec)
-  │   ┌────────────────────────┐
-  │   │ OrderedLogger (DEC)    │
-  │   │  • log("Loading...")   │
-  │   │  • log("✓ Loaded")     │
-  │   │  • log("✓ Ready")      │
-  │   └────────────────────────┘
-  │
-  ├─► Flush Decision Buffer
-  │       ↓
-  │   [DECISION ] Loading...
-  │   [DECISION ] ✓ Loaded
-  │   [DECISION ] ✓ Ready
-  │
-  └─► Start Main Loop
+User           LKASServer       ProcessManagers     Subprocesses    BroadcastMgr
+ │                  │                  │                 │                │
+ │  run()           │                  │                 │                │
+ ├─────────────────>│                  │                 │                │
+ │                  │                  │                 │                │
+ │                  │ setup()          │                 │                │
+ │                  ├─────────────────────────────────────────────────────>│
+ │                  │                  │                 │                │
+ │                  │ launch()         │                 │                │
+ │                  ├─────────────────>│                 │                │
+ │                  │                  │ subprocess.Popen│                │
+ │                  │                  ├────────────────>│                │
+ │                  │                  │                 │                │
+ │                  │ wait_for_init()  │                 │                │
+ │                  ├─────────────────>│                 │                │
+ │                  │                  │ read_output()   │                │
+ │                  │                  ├────────────────>│                │
+ │                  │                  │<────────────────┤                │
+ │                  │                  │ "Server Started"│                │
+ │                  │                  │                 │                │
+ │                  │ announce_ready() │                 │                │
+ │                  ├─────────────────────────────────────────────────────>│
+ │                  │                  │                 │                │
+ │                  │ main_loop()      │                 │                │
+ │                  │ ┌────────────────┴─────────────────┴───────────────┐│
+ │                  │ │  Loop:                                            ││
+ │                  │ │    • poll_broker()                                ││
+ │                  │ │    • broadcast_data()                             ││
+ │                  │ │    • read_output() from processes                 ││
+ │                  │ │    • check is_alive()                             ││
+ │                  │ └────────────────┬─────────────────┬───────────────┘│
+ │                  │                  │                 │                │
+ │  Ctrl+C          │                  │                 │                │
+ ├─────────────────>│                  │                 │                │
+ │                  │                  │                 │                │
+ │                  │ stop()           │                 │                │
+ │                  ├─────────────────>│                 │                │
+ │                  │                  │ terminate()     │                │
+ │                  │                  ├────────────────>│                │
+ │                  │                  │ wait()          │                │
+ │                  │                  ├────────────────>│                │
+ │                  │                  │                 │                │
+ │                  │ close()          │                 │                │
+ │                  ├─────────────────────────────────────────────────────>│
+ │                  │                  │                 │                │
+ │<─────────────────┤                  │                 │                │
+ │  exit(0)         │                  │                 │                │
 ```
 
-## Runtime Flow (Live Stats)
+## Class Responsibilities
 
-```
-Detection Process                 LKAS Launcher                  Terminal
-─────────────────                ─────────────                  ─────────
+### ProcessManager (Abstract Base)
+```python
+class ProcessManager:
+    """Base class for all subprocess management."""
 
-Frame processing...
-   │
-   ├─► Print FPS stats ──────►  Read stdout
-                                     │
-                                     ├─ Detect "FPS" in line
-                                     │
-                                     ├─ Update last_detection_stats
-                                     │
-                                     └─ _update_footer()
-                                            │
-                                            ├─ Combine DET + DEC stats
-                                            │
-                                            └─► terminal.update_footer() ──►  Clear current footer
-                                                                              Print new footer
-                                                                              Stay at bottom
+    # Concrete methods (implemented):
+    def launch(log_file) -> int
+    def read_output(buffering_mode, shm_callback)
+    def is_alive() -> bool
+    def stop(timeout, terminal)
 
-
-Decision Process
-─────────────────
-
-Frame processing...
-   │
-   ├─► Print FPS stats ──────►  Read stdout
-                                     │
-                                     ├─ Detect "FPS" in line
-                                     │
-                                     ├─ Update last_decision_stats
-                                     │
-                                     └─ _update_footer()
-                                            │
-                                            └─► terminal.update_footer() ──►  Update footer
+    # Abstract methods (must implement):
+    @abstractmethod
+    def build_command() -> List[str]
+    @abstractmethod
+    def get_process_name() -> str
+    @abstractmethod
+    def check_initialization_marker(msg) -> bool
 ```
 
-## Component Hierarchy
+### DetectionProcessManager
+```python
+class DetectionProcessManager(ProcessManager):
+    """Manages detection server subprocess."""
 
-```
-LKASLauncher
-│
-├── TerminalDisplay (instance)
-│   ├── print(message, prefix)       # Scrolling messages
-│   ├── update_footer(text)           # Persistent footer
-│   ├── clear_footer()                # Remove footer
-│   └── lock (threading.Lock)         # Thread safety
-│
-├── OrderedLogger (detection_logger)
-│   ├── buffer: List[str]             # Message buffer
-│   ├── log(message)                  # Add to buffer
-│   ├── flush()                       # Print all buffered
-│   └── print_immediate(message)      # Bypass buffer
-│
-├── OrderedLogger (decision_logger)
-│   └── (same as above)
-│
-├── last_detection_stats: str         # Latest detection stats
-├── last_decision_stats: str          # Latest decision stats
-│
-├── detection_process: Popen          # Detection subprocess
-└── decision_process: Popen           # Decision subprocess
+    # Implementation specifics:
+    • Builds: python -m lkas.detection.run --method {cv|dl} ...
+    • Monitors: "Detection Server Started"
+    • Manages: GPU, image/detection SHM, retry config
 ```
 
-## Message Classification
+### DecisionProcessManager
+```python
+class DecisionProcessManager(ProcessManager):
+    """Manages decision server subprocess."""
 
-```
-Process Output Line
-       │
-       ├─── Contains "\r" or "FPS"?
-       │
-       ├─ YES ──► Stats Line
-       │           │
-       │           ├─ Extract stats
-       │           ├─ Update last_*_stats
-       │           └─ Call _update_footer()
-       │                 │
-       │                 └─ Combine DET + DEC
-       │                    │
-       │                    └─ terminal.update_footer()
-       │
-       └─ NO ──► Regular Message
-                   │
-                   └─ logger.print_immediate()
-                        │
-                        └─ terminal.print()
+    # Implementation specifics:
+    • Builds: python -m lkas.decision.run ...
+    • Monitors: "Decision Server Started"
+    • Manages: Detection/control SHM, retry config
 ```
 
-## ANSI Escape Sequence Usage
+### BroadcastManager
+```python
+class BroadcastManager:
+    """Manages ZMQ broadcasting and SHM reading."""
 
-```
-Operation                    ANSI Code          Effect
-─────────────────────────   ─────────────      ─────────────────────
-Clear current line          \033[2K\r          Erase line, return to start
-Move cursor up              \033[1A            Move up 1 line
-Move cursor down            \033[1B            Move down 1 line
-Save cursor position        \033[s             Remember position
-Restore cursor position     \033[u             Go back to saved position
-Hide cursor                 \033[?25l          Invisible cursor
-Show cursor                 \033[?25h          Visible cursor
-```
+    # Key responsibilities:
+    • setup() - Initialize ZMQ broker
+    • broadcast_data() - Read SHM, broadcast via ZMQ
+    • poll_broker() - Handle parameter updates
+    • close() - Cleanup resources
 
-## Threading Model
-
-```
-Main Thread (LKASLauncher.run())
-     │
-     ├─ Spawn Detection Process
-     │     │
-     │     └─ stdout pipe
-     │
-     ├─ Spawn Decision Process
-     │     │
-     │     └─ stdout pipe
-     │
-     └─ Main Loop:
-         │
-         ├─► _read_process_output(detection, ...) ──┐
-         │                                           │
-         ├─► _read_process_output(decision, ...)  ──┤
-         │                                           │
-         │                    ┌────────────────────►│
-         │                    │                      │
-         │                    │  Terminal Lock       │
-         │                    │  ───────────────     │
-         │                    │  Prevents race       │
-         │                    │  conditions when     │
-         │                    │  both processes      │
-         │                    │  write at same time  │
-         │                    │                      │
-         └────────────────────┘◄─────────────────────┘
+    # Lazy connections:
+    • Image channel (camera feed)
+    • Detection channel (lane results)
+    • Control channel (steering, metrics)
 ```
 
-## Example State Transitions
+### LKASServer
+```python
+class LKASServer:
+    """Main orchestrator for LKAS system."""
 
-### Startup Phase
-```
-State 1: INIT
-  ├─ terminal = TerminalDisplay()
-  ├─ detection_logger = OrderedLogger()
-  └─ decision_logger = OrderedLogger()
+    # Key responsibilities:
+    • Configuration loading and resolution
+    • Component initialization
+    • Process lifecycle coordination
+    • Signal handling (Ctrl+C)
+    • Terminal display management
 
-State 2: DETECTION_STARTING
-  ├─ Start detection process
-  ├─ Buffer detection messages
-  └─ Flush detection buffer
-
-State 3: DECISION_STARTING
-  ├─ Start decision process
-  ├─ Buffer decision messages
-  └─ Flush decision buffer
-
-State 4: RUNNING
-  ├─ Read both process outputs
-  ├─ Classify: stats vs regular
-  └─ Update footer or print message
+    # Delegation:
+    • ProcessManagers handle subprocess details
+    • BroadcastManager handles ZMQ/SHM
+    • Terminal handles UI
 ```
 
-### Footer Update Sequence
-```
-1. New stats line from Detection
-   └─► last_detection_stats = "30.2 FPS | Frame 1234..."
+## Benefits of This Architecture
 
-2. Call _update_footer()
-   ├─ parts = []
-   ├─ parts.append(f"[DET] {last_detection_stats}")
-   ├─ parts.append(f"[DEC] {last_decision_stats}")
-   └─ footer_text = " | ".join(parts)
+1. **Separation of Concerns**
+   - Each class has ONE clear purpose
+   - No mixing of subprocess, broadcasting, and orchestration logic
 
-3. terminal.update_footer(footer_text)
-   ├─ Acquire lock
-   ├─ Write: \033[2K\r (clear current footer)
-   ├─ Write: footer_text
-   ├─ Flush stdout
-   └─ Release lock
+2. **Reusability**
+   - ProcessManager can be extended for new servers
+   - BroadcastManager can be reused in other projects
 
-4. Result:
-   [DET] 30.2 FPS | Frame 1234 | ... | [DEC] 30.5 FPS | ...
-```
+3. **Testability**
+   - Mock ProcessManagers to test LKASServer
+   - Mock subprocess to test ProcessManagers
+   - Mock SHM to test BroadcastManager
 
-## Performance Characteristics
+4. **Maintainability**
+   - Bug in broadcasting? Check BroadcastManager
+   - Process crash? Check ProcessManager
+   - Orchestration issue? Check LKASServer
 
-```
-Operation                  Complexity    Notes
-────────────────────────  ───────────   ─────────────────────
-print() with footer       O(1)          Clear, print, restore
-print() without footer    O(1)          Direct stdout.write()
-update_footer()           O(1)          Clear + write
-Buffered logging          O(n)          n = number of messages
-Lock acquisition          O(1)          Fast uncontended
-```
-
-## Design Patterns Used
-
-1. **Facade Pattern**
-   - `TerminalDisplay` hides ANSI complexity
-   - Simple API: print(), update_footer()
-
-2. **Buffering Pattern**
-   - `OrderedLogger` buffers messages
-   - Flush when ready for ordering
-
-3. **Observer Pattern**
-   - LKASLauncher observes subprocess output
-   - Routes to appropriate handler
-
-4. **Thread Safety**
-   - All terminal operations protected by locks
-   - Prevents interleaved output
-
-5. **Separation of Concerns**
-   - Display logic in terminal.py
-   - Business logic in run.py
-   - Clean boundaries
+5. **Extensibility**
+   - Add new process type: Extend ProcessManager
+   - Change broadcast protocol: Modify BroadcastManager
+   - Add new feature: Clear where it belongs
