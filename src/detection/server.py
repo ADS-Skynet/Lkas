@@ -15,7 +15,7 @@ import sys
 from typing import Optional
 
 from lkas.detection import LaneDetection
-from skynet_common.config import Config
+from common.config import Config
 from lkas.integration.shared_memory.messages import ImageMessage, DetectionMessage
 from lkas.integration.shared_memory import (
     SharedMemoryImageChannel,
@@ -107,7 +107,7 @@ class DetectionServer:
             # Setup parameter updates if enabled
             self.param_sub = None
             if enable_parameter_updates:
-                from skynet_common.communication import ParameterSubscriber
+                from common.communication import ParameterSubscriber
 
                 print(f"\nSetting up real-time parameter updates...")
                 self.param_sub = ParameterSubscriber(

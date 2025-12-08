@@ -17,7 +17,7 @@ import yaml
 from pathlib import Path
 
 from lkas.utils.terminal import TerminalDisplay
-from skynet_common.config import ConfigManager
+from common.config import ConfigManager
 from lkas.constants import Launcher
 from lkas.process import DetectionProcessManager, DecisionProcessManager
 from lkas.broadcast import BroadcastManager

@@ -10,7 +10,7 @@ For C++ developers:
     Formula: output = Kp * error + Kd * derivative(error)
 """
 
-from skynet_common.types.models import LaneMetrics, Lane
+from common.types.models import LaneMetrics, Lane
 from lkas.decision.core.interfaces import SteeringController
 import time
 

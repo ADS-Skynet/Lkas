@@ -16,7 +16,7 @@ For those new to MPC:
     Cost = Σ(lateral_error² + heading_error² + steering_effort²)
 """
 
-from skynet_common.types.models import LaneMetrics
+from common.types.models import LaneMetrics
 from lkas.decision.core.interfaces import SteeringController
 import numpy as np
 
@@ -318,7 +318,7 @@ if __name__ == "__main__":
     # Example usage
     print("Testing MPCController (Skeleton)...")
 
-    from skynet_common.types.models import LaneMetrics
+    from common.types.models import LaneMetrics
 
     # Create controller
     controller = MPCController(

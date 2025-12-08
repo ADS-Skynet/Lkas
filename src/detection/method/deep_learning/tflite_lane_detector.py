@@ -12,8 +12,8 @@ import cv2
 from typing import Tuple
 
 from lkas.detection.core.interfaces import LaneDetector
-from skynet_common.types.models import Lane, DetectionResult
-from skynet_common.config import DLDetectorConfig
+from common.types.models import Lane, DetectionResult
+from common.config import DLDetectorConfig
 
 # Install global handler to suppress TFLite Delegate.__del__ errors
 # This must be done before importing TensorFlow

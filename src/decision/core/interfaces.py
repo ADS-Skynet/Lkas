@@ -5,7 +5,7 @@ Defines contracts that all controller implementations must follow.
 """
 
 from abc import ABC, abstractmethod
-from skynet_common.types.models import LaneMetrics
+from common.types.models import LaneMetrics
 
 
 class SteeringController(ABC):

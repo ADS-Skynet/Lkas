@@ -32,7 +32,7 @@ import signal
 import time
 from pathlib import Path
 
-from skynet_common.config import ConfigManager
+from common.config import ConfigManager
 from lkas.integration.shared_memory.messages import DetectionMessage, ControlMessage
 from lkas.integration.shared_memory import SharedMemoryDetectionChannel, SharedMemoryControlChannel
 from lkas.decision import DecisionController

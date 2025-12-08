@@ -7,7 +7,7 @@ import numpy as np
 from typing import Tuple, Dict
 from enum import Enum
 
-from skynet_common.types.models import Lane, LaneMetrics, LaneDepartureStatus
+from common.types.models import Lane, LaneMetrics, LaneDepartureStatus
 
 
 class LaneAnalyzer:

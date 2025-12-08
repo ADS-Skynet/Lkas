@@ -10,7 +10,7 @@ For C++ developers:
     Formula: output = Kp * error + Kd * derivative(error)
 """
 
-from skynet_common.types.models import LaneMetrics, Lane
+from common.types.models import LaneMetrics, Lane
 from lkas.decision.core.interfaces import SteeringController
 
 
@@ -275,7 +275,7 @@ if __name__ == "__main__":
     # Example usage
     print("Testing PDController...")
 
-    from skynet_common.types.models import LaneMetrics, LaneDepartureStatus
+    from common.types.models import LaneMetrics, LaneDepartureStatus
 
     # Create controller
     controller = PDController(kp=0.5, kd=0.1)

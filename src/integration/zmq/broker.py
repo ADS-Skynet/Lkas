@@ -473,7 +473,7 @@ def create_broker_from_config(verbose: bool = False) -> LKASBroker:
         LKASBroker instance configured from common config
     """
     try:
-        from skynet_common.config import ConfigManager
+        from common.config import ConfigManager
         config = ConfigManager.load()
         comm = config.communication
 

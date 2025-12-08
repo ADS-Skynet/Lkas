@@ -45,7 +45,7 @@ detection/
 
 ### 1. Data Models
 
-**Lane** (from `skynet_common.types.models`)
+**Lane** (from `common.types.models`)
 ```python
 @dataclass
 class Lane:
@@ -60,7 +60,7 @@ class Lane:
     length: float
 ```
 
-**DetectionResult** (from `skynet_common.types.models`)
+**DetectionResult** (from `common.types.models`)
 ```python
 @dataclass
 class DetectionResult:
@@ -88,7 +88,7 @@ All detectors implement the `LaneDetector` abstract base class:
 
 ```python
 from abc import ABC, abstractmethod
-from skynet_common.types.models import DetectionResult
+from common.types.models import DetectionResult
 
 class LaneDetector(ABC):
     @abstractmethod
@@ -134,7 +134,7 @@ class LaneDetector(ABC):
 Configuration is loaded from the project-wide `config.yaml` file:
 
 ```python
-from skynet_common.config import ConfigManager
+from common.config import ConfigManager
 
 # Load configuration
 config = ConfigManager.load('config.yaml')
@@ -203,7 +203,7 @@ Neural network-based approach using PyTorch:
 ### Basic Usage
 
 ```python
-from skynet_common.config import ConfigManager
+from common.config import ConfigManager
 from lkas.detection.core.factory import DetectorFactory
 
 # Load configuration
@@ -252,7 +252,7 @@ Server features:
 
 ```python
 from lkas.detection import DetectionClient
-from skynet_common.config import ConfigManager
+from common.config import ConfigManager
 
 # Initialize client
 config = ConfigManager.load('config.yaml')
@@ -272,7 +272,7 @@ if detection_msg:
 
 ```python
 from lkas.detection import LaneDetection
-from skynet_common.config import ConfigManager
+from common.config import ConfigManager
 
 # Initialize detector
 config = ConfigManager.load('config.yaml')
@@ -328,7 +328,7 @@ detection:
 
 ```python
 from lkas.detection.core.interfaces import LaneDetector
-from skynet_common.types.models import DetectionResult
+from common.types.models import DetectionResult
 
 class MyCustomDetector(LaneDetector):
     def detect(self, image: np.ndarray) -> DetectionResult:

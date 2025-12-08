@@ -106,7 +106,7 @@ Abstract base class for all control implementations:
 
 ```python
 from abc import ABC, abstractmethod
-from skynet_common.types.models import LaneMetrics
+from common.types.models import LaneMetrics
 
 class SteeringController(ABC):
     @abstractmethod
@@ -381,7 +381,7 @@ decision:
 
 ```python
 from lkas.decision.core.interfaces import SteeringController
-from skynet_common.types.models import LaneMetrics
+from common.types.models import LaneMetrics
 
 class MyController(SteeringController):
     def __init__(self, custom_param: float = 1.0):
@@ -441,7 +441,7 @@ decision-server --method my_controller --custom-param 1.5
 
 - **Core**: numpy, dataclasses
 - **Communication**: multiprocessing.shared_memory, zmq
-- **Types**: skynet_common.types.models
+- **Types**: common.types.models
 
 ## Related Modules
 
