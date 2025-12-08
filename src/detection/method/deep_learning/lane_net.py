@@ -12,8 +12,8 @@ import numpy as np
 from typing import Tuple
 
 from lkas.detection.core.interfaces import LaneDetector
-from lkas.detection.core.models import Lane, DetectionResult
-from skynet_common.config import DLDetectorConfig
+from common.types.models import Lane, DetectionResult
+from common.config import DLDetectorConfig
 
 # Import the base DL detector implementation
 from lkas.detection.method.deep_learning.lane_net_base import DLLaneDetector as _BaseDLLaneDetector

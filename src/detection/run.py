@@ -23,7 +23,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from skynet_common.config import ConfigManager
+from common.config import ConfigManager
 from lkas.detection.server import DetectionServer
 
 

@@ -9,35 +9,40 @@ The LKAS module processes camera frames from the simulation/vehicle, detects lan
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                     LKAS Module                          │
-├──────────────────────────────────────────────────────────┤
-│                                                          │
-│  ┌─────────────┐    ┌─────────────┐    ┌────────────┐  │
-│  │  Detection  │ -> │  Decision   │ -> │ Actuator   │  │
-│  │  (Vision)   │    │   (PID)     │    │ (Steering) │  │
-│  └─────────────┘    └─────────────┘    └────────────┘  │
-│         │                   │                   │        │
-│         └───────────────────┴───────────────────┘        │
-│                         │                                │
-│                    ZMQ Broker                            │
-│                  (Coordination)                          │
-│                         │                                │
-└─────────────────────────┼────────────────────────────────┘
-                          │
-          ┌───────────────┼───────────────┐
-          │               │               │
-    Simulation        Viewer       Parameter Updates
-    (Vehicle)      (Monitoring)    (Live Tuning)
+┌─────────────────────────────────────────────────────────────────┐
+│                        LKAS Module                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────┐  Shared Memory  ┌─────────────┐  Shared Memory│
+│  │  Detection  │ ───────────────►│  Decision   │───────────────►│
+│  │   Server    │   (~0.01ms)     │   Server    │   (~0.01ms)   │
+│  │   (CV/DL)   │                 │  (PD/PID)   │               │
+│  └─────┬───────┘                 └──────┬──────┘               │
+│        │                                │                       │
+│        │ ZMQ Parameters                 │ ZMQ Parameters        │
+│        │                                │                       │
+│        └────────────┬───────────────────┘                       │
+│                     │                                           │
+│              ┌──────▼────────┐                                  │
+│              │  LKAS Broker  │                                  │
+│              │ (Integration) │                                  │
+│              └──────┬────────┘                                  │
+│                     │                                           │
+└─────────────────────┼───────────────────────────────────────────┘
+                      │
+       ┌──────────────┼──────────────┬───────────────────┐
+       │              │              │                   │
+   Simulation      Viewer     Parameter Updates     Action Requests
+   (Vehicle)    (Monitoring)   (Live Tuning)        (Pause/Resume)
 ```
 
 ## Features
 
-### Detection (Computer Vision)
+### Detection Module ([src/detection/](src/detection/))
 - **Multi-method support:**
   - `cv`: Classical OpenCV (Canny + Hough Transform)
-  - `yolo`: Deep learning-based detection (YOLOv8)
-  - `yolo-seg`: Semantic segmentation-based detection
+  - `dl`: Deep learning-based detection (PyTorch)
+  - Pluggable architecture for easy extension
 - **Lane processing:**
   - Edge detection with Canny algorithm
   - Line detection via Hough Transform
@@ -47,29 +52,57 @@ The LKAS module processes camera frames from the simulation/vehicle, detects lan
   - ROI (Region of Interest) masking
   - Configurable preprocessing pipeline
   - Adaptive thresholding
+- **Performance:** 5-15ms (CV), 15-30ms (DL)
 
-### Decision (Control)
-- **PID Controller:**
-  - Proportional (Kp) + Derivative (Kd) control
-  - Lateral offset and heading angle calculation
-  - Smooth steering output with thresholding
+See [Detection Module README](src/detection/README.md) for details.
+
+### Decision Module ([src/decision/](src/decision/))
+- **Multi-controller support:**
+  - `pd`: Proportional-Derivative control (fast, stateless)
+  - `pid`: Proportional-Integral-Derivative control (zero steady-state error)
+  - `mpc`: Model Predictive Control (optimal, future)
+- **Lane analysis:**
+  - Lateral offset calculation (pixels, meters, normalized)
+  - Heading angle estimation
+  - Lane departure detection (CENTERED, DRIFT, DEPARTURE)
+- **Adaptive throttle:**
+  - Automatic speed reduction in turns
+  - Configurable throttle policy
 - **Safety features:**
-  - Lane departure detection
-  - Emergency centering logic
+  - Emergency braking when no lanes detected
   - Configurable control limits
+- **Performance:** <2ms total decision latency
 
-### ZMQ Broker (Integration Hub)
-- **Bidirectional communication:**
-  - Receives frames from simulation (port 5560)
-  - Sends steering commands to simulation (port 5563)
-- **Data broadcasting:**
-  - Publishes frames, detections, and vehicle state to viewer (port 5557)
-  - Receives actions from viewer (port 5558)
-  - Handles parameter updates (port 5559)
-- **Process coordination:**
-  - Manages LKAS pipeline lifecycle
-  - Handles pause/resume/respawn actions
-  - Synchronizes data between modules
+See [Decision Module README](src/decision/README.md) for details.
+
+### Integration Module ([src/integration/](src/integration/))
+- **Shared Memory IPC:**
+  - Ultra-low latency (~0.01ms) for local processes
+  - Zero-copy image and detection transfer
+  - ImageChannel, DetectionChannel, ControlChannel
+- **ZMQ Communication:**
+  - Network-capable broadcasting to viewers
+  - Real-time parameter updates (port 5559 → 5560)
+  - Action requests (pause, resume, respawn)
+  - Vehicle telemetry streaming
+- **LKASBroker:**
+  - Central coordination hub
+  - Routes parameters to detection/decision servers
+  - Broadcasts data to viewers (port 5557)
+  - Handles viewer actions (port 5558)
+
+See [Integration Module README](src/integration/README.md) for details.
+
+### Utils Module ([src/utils/](src/utils/))
+- **Terminal display:**
+  - Persistent footer with live stats (FPS, frame count, latency)
+  - Ordered logging from concurrent processes
+  - ANSI-based structured output
+- **Helper utilities:**
+  - FPS formatting
+  - Progress bars
+
+See [Utils Module README](src/utils/README.md) for details.
 
 ## Quick Start
 
@@ -127,70 +160,128 @@ detection:
 
 ```yaml
 decision:
+  method: pd        # pd, pid, or mpc
   kp: 0.5           # Proportional gain
+  ki: 0.01          # Integral gain (PID only)
   kd: 0.1           # Derivative gain
-  throttle_base: 0.14
+
+  # Adaptive throttle policy
+  throttle_base: 0.15
   throttle_min: 0.05
   steer_threshold: 0.15
+  steer_max: 0.70
+
+  # Lane analyzer
+  drift_threshold: 0.15
+  departure_threshold: 0.35
+  lane_width_meters: 3.7
 ```
 
-### ZMQ Configuration
+### Integration Configuration
 
 ```yaml
+# Shared Memory (ultra-low latency IPC)
+shared_memory:
+  image_channel: "camera_feed"
+  detection_channel: "lane_detection"
+  control_channel: "vehicle_control"
+
+# ZMQ (network-capable communication)
 zmq:
   broker:
-    # Simulation connection
-    detection_input_port: 5560   # Receive frames from sim
-    decision_output_port: 5563   # Send steering to sim
-
-    # Viewer broadcasting
-    viewer_data_port: 5557       # Broadcast data to viewer
-    viewer_action_port: 5558     # Receive actions from viewer
-    parameter_update_port: 5559  # Receive parameter updates
+    viewer_data_port: 5557          # Broadcast to viewers
+    viewer_action_port: 5558        # Receive actions from viewers
+    parameter_update_port: 5559     # Receive parameter updates
+    server_parameter_port: 5560     # Forward parameters to servers
+    simulation_action_port: 5561    # Forward actions to simulation
+    simulation_status_port: 5562    # Receive vehicle status
 ```
 
 ## Module Structure
 
 ```
 lkas/
-├── run.py                        # Main entry point
+├── src/
+│   ├── detection/               # Lane detection module
+│   │   ├── core/
+│   │   │   ├── interfaces.py   # LaneDetector ABC
+│   │   │   ├── factory.py      # DetectorFactory
+│   │   │   └── __init__.py
+│   │   ├── method/
+│   │   │   ├── computer_vision/  # CV-based detection
+│   │   │   └── deep_learning/    # DL-based detection
+│   │   ├── detector.py         # LaneDetection wrapper
+│   │   ├── client.py           # DetectionClient
+│   │   ├── server.py           # DetectionServer
+│   │   ├── run.py              # CLI entrypoint
+│   │   └── README.md           # Detection docs
+│   │
+│   ├── decision/                # Steering control module
+│   │   ├── core/
+│   │   │   ├── interfaces.py   # SteeringController ABC
+│   │   │   ├── factory.py      # ControllerFactory
+│   │   │   └── __init__.py
+│   │   ├── method/
+│   │   │   ├── pd_controller.py   # PD control
+│   │   │   ├── pid_controller.py  # PID control
+│   │   │   └── mpc_controller.py  # MPC control
+│   │   ├── controller.py       # DecisionController
+│   │   ├── lane_analyzer.py    # LaneAnalyzer
+│   │   ├── client.py           # DecisionClient
+│   │   ├── server.py           # DecisionServer
+│   │   ├── run.py              # CLI entrypoint
+│   │   └── README.md           # Decision docs
+│   │
+│   ├── integration/             # Communication layer
+│   │   ├── shared_memory/      # Ultra-low latency IPC
+│   │   │   ├── channels.py     # Image/Detection/Control channels
+│   │   │   ├── messages.py     # Message definitions
+│   │   │   └── __init__.py
+│   │   ├── zmq/                # Network messaging
+│   │   │   ├── broker.py       # LKASBroker
+│   │   │   ├── broadcaster.py  # Data broadcasting
+│   │   │   ├── messages.py     # ZMQ message protocols
+│   │   │   ├── README.md       # ZMQ docs
+│   │   │   └── __init__.py
+│   │   └── README.md           # Integration docs
+│   │
+│   ├── utils/                   # Utilities
+│   │   ├── terminal.py         # Terminal display
+│   │   ├── README.md           # Utils docs
+│   │   └── __init__.py
+│   │
+│   ├── process.py              # Process management
+│   ├── server.py               # LKASServer (orchestrator)
+│   ├── client.py               # LKASClient
+│   ├── run.py                  # Main CLI entrypoint
+│   └── __init__.py
 │
-├── detection/                    # Lane detection
-│   ├── core/
-│   │   ├── detector.py          # Detection interface
-│   │   ├── config.py            # Configuration management
-│   │   └── models.py            # Data models
-│   ├── cv/
-│   │   └── detector.py          # OpenCV-based detector
-│   ├── yolo/
-│   │   ├── detector.py          # YOLO-based detector
-│   │   └── model_loader.py      # Model loading utilities
-│   └── preprocessing/
-│       └── roi.py               # ROI masking
-│
-├── decision/                     # Steering control
-│   ├── controller.py            # PID controller
-│   └── metrics.py               # Control metrics
-│
-├── integration/                  # Communication layer
-│   ├── shared_memory/           # Shared memory IPC (legacy)
-│   │   └── channels.py
-│   └── zmq/                     # ZMQ-based communication
-│       ├── broker.py            # Main ZMQ broker
-│       ├── broadcaster.py       # Data broadcasting
-│       └── messages.py          # Message protocols
-│
-└── orchestrator.py              # LKAS pipeline coordinator
+├── ARCHITECTURE.md              # Architecture documentation
+└── README.md                    # This file
 ```
 
 ## Performance
 
 ### Typical Performance Metrics
 
-- **Detection latency:** 5-15ms (OpenCV), 20-40ms (YOLO)
-- **Decision latency:** <1ms
+- **Detection latency:** 5-15ms (CV), 15-30ms (DL)
+- **Decision latency:** <2ms
+- **Shared memory transfer:** ~0.01ms per channel
+- **ZMQ broadcast:** 0.5-2ms (localhost), 5-50ms (network)
 - **End-to-end latency:** 10-50ms
 - **Target FPS:** 30+ FPS
+
+### Latency Breakdown
+
+```
+Camera → Detection:  ~0.01ms  (Shared Memory)
+Detection Process:   5-30ms   (CV/DL algorithm)
+Detection → Decision: ~0.01ms (Shared Memory)
+Decision Process:    <2ms     (PD/PID control)
+Decision → Control:  ~0.01ms  (Shared Memory)
+──────────────────────────────
+Total:               ~10-50ms
+```
 
 ### Performance Tips
 
@@ -259,23 +350,22 @@ The viewer provides real-time parameter adjustment via WebSocket:
 
 ### Adding a New Detection Method
 
-1. Create detector class in `detection/<method>/`:
+1. Create detector class in `detection/method/<method>/`:
 ```python
-from detection.core.detector import LaneDetector
+from lkas.detection.core.base import BaseDetector
 
-class MyDetector(LaneDetector):
+class MyDetector(BaseDetector):
     def detect(self, image):
         # Implement detection logic
         return left_lane, right_lane
 ```
 
-2. Register in `detection/core/detector.py`:
+2. Register in `detection/core/factory.py`:
 ```python
-DETECTORS = {
-    'cv': CVDetector,
-    'yolo': YOLODetector,
-    'my_method': MyDetector,
-}
+# Add to DetectorFactory.create() method
+if method == 'my_method':
+    from lkas.detection.method.my_method import MyDetector
+    return MyDetector(self.config)
 ```
 
 3. Use it:
@@ -314,6 +404,18 @@ ss -tlnp | grep '555[7-9]\|556[0-3]'
 
 ## References
 
-- [Shared Memory Communication](integration/shared_memory/README.md)
-- [ZMQ Integration](integration/zmq/README.md)
-- [Detection Methods Comparison](detection/README.md)
+### Module Documentation
+- [Detection Module](src/detection/README.md) - Lane detection algorithms and usage
+- [Decision Module](src/decision/README.md) - Steering control and lane analysis
+- [Integration Module](src/integration/README.md) - Communication infrastructure
+  - [ZMQ Integration](src/integration/zmq/README.md) - ZMQ broker details
+- [Utils Module](src/utils/README.md) - Terminal display and utilities
+
+### Architecture
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture and data flow
+
+### External
+- [CARLA Simulator](https://carla.org/) - Autonomous driving simulator
+- [OpenCV](https://opencv.org/) - Computer vision library
+- [PyTorch](https://pytorch.org/) - Deep learning framework
+- [ZeroMQ](https://zeromq.org/) - High-performance messaging library

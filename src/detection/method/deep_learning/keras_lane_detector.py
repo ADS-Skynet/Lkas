@@ -11,8 +11,8 @@ import cv2
 from typing import Tuple
 
 from lkas.detection.core.interfaces import LaneDetector
-from lkas.detection.core.models import Lane, DetectionResult
-from skynet_common.config import DLDetectorConfig
+from common.types.models import Lane, DetectionResult
+from common.config import DLDetectorConfig
 
 
 class KerasLaneDetector(LaneDetector):

@@ -18,9 +18,9 @@ Architecture:
 Usage Levels:
 
     Level 1 (Highest) - Production Use:
-        from lkas import LKAS
+        from lkas import LKASClient
 
-        lkas = LKAS(image_shape=(600, 800, 3))
+        lkas = LKASClient(image_shape=(600, 800, 3))
         lkas.send_image(image, timestamp, frame_id)
         control = lkas.get_control()
 
@@ -39,7 +39,7 @@ Usage Levels:
         decision-server
 
 Public API:
-- LKAS: Complete lane keeping system (recommended)
+- LKASClient: Complete lane keeping system (recommended)
 - LKASSimple: Minimal interface (send/receive only)
 
 Submodules (for advanced use):
@@ -47,8 +47,8 @@ Submodules (for advanced use):
 - lkas.decision: Decision-making components
 """
 
-from .system import LKAS, LKASSimple
+from .client import LKASClient, LKASSimple
 
 __version__ = "0.1.0"
 
-__all__ = ['LKAS', 'LKASSimple']
+__all__ = ['LKASClient', 'LKASSimple']

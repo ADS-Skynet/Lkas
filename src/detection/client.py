@@ -19,7 +19,7 @@ from lkas.integration.shared_memory import (
     SharedMemoryDetectionChannel,
     SharedMemoryImageChannel
 )
-from lkas.integration.messages import DetectionMessage
+from lkas.integration.shared_memory.messages import DetectionMessage
 
 
 class DetectionClient:

@@ -10,11 +10,12 @@ For C++ developers:
     Formula: output = Kp * error + Kd * derivative(error)
 """
 
-from lkas.detection.core.models import LaneMetrics, Lane
+from common.types.models import LaneMetrics, Lane
+from lkas.decision.core.interfaces import SteeringController
 import time
 
 
-class PIDController:
+class PIDController(SteeringController):
     """
     PID (Proportional-Integral-Derivative) controller for steering correction.
 
@@ -228,6 +229,63 @@ class PIDController:
         self.integral = 0.0
         self.prev_error = 0.0
         self.prev_time = time.time()
+
+    def get_name(self) -> str:
+        """
+        Return the name of this controller.
+
+        Returns:
+            Controller name
+        """
+        return "PID Controller"
+
+    def get_parameters(self) -> dict:
+        """
+        Return current controller parameters as dict.
+
+        Returns:
+            Dictionary of parameter names and values
+        """
+        return {
+            "kp": self.kp,
+            "ki": self.ki,
+            "kd": self.kd,
+        }
+
+    def update_parameter(self, name: str, value: float) -> bool:
+        """
+        Update a single controller parameter.
+
+        Args:
+            name: Parameter name ('kp', 'ki', or 'kd')
+            value: New parameter value
+
+        Returns:
+            True if parameter was updated successfully, False otherwise
+        """
+        if name == "kp":
+            self.kp = float(value)
+            return True
+        elif name == "ki":
+            self.ki = float(value)
+            return True
+        elif name == "kd":
+            self.kd = float(value)
+            return True
+        return False
+
+    def get_state(self) -> dict:
+        """
+        Get current internal state of the controller.
+
+        Returns:
+            Dictionary of state variables
+        """
+        return {
+            "integral": self.integral,
+            "prev_error": self.prev_error,
+            "prev_time": self.prev_time,
+        }
 
 
 # =============================================================================

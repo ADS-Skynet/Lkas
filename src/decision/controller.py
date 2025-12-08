@@ -2,18 +2,18 @@
 Decision Controller
 
 Main controller that receives detection results and generates control commands.
-Combines lane analysis with PD control logic.
+Combines lane analysis with steering control logic.
 """
 
-from lkas.integration.messages import (
+from lkas.integration.shared_memory.messages import (
     DetectionMessage,
     ControlMessage,
     LaneMessage,
     ControlMode,
 )
 from lkas.decision.lane_analyzer import LaneAnalyzer
-from lkas.decision.pd_controller import PDController
-from lkas.decision.pid_controller import PIDController
+from lkas.decision.core.factory import ControllerFactory
+from lkas.decision.core.interfaces import SteeringController
 
 
 class DecisionController:
@@ -34,8 +34,9 @@ class DecisionController:
         kp: float = 0.5,
         ki: float = 0.01,
         kd: float = 0.1,
-        controller_method: str = "pd",
+        controller_method: str = "pid",
         throttle_policy: dict | None = None,
+        config=None,
     ):
         """
         Initialize decision controller.
@@ -46,22 +47,30 @@ class DecisionController:
             kp: Proportional gain for steering control
             ki: Integral gain for steering control (PID only)
             kd: Derivative gain for steering control
-            controller_method: Controller type ('pd' or 'pid')
+            controller_method: Controller type ('pd', 'pid', 'mpc', etc.)
             throttle_policy: Adaptive throttle configuration dict with keys:
                 - base: Base throttle value (default: 0.45)
                 - min: Minimum throttle value (default: 0.18)
                 - steer_threshold: Steering magnitude to start reducing throttle (default: 0.15)
                 - steer_max: Maximum steering for throttle calculation (default: 0.70)
+            config: Optional system configuration object
         """
         # Lane analysis
         self.analyzer = LaneAnalyzer(image_width=image_width, image_height=image_height)
 
-        # Steering control - instantiate based on controller_method
+        # Steering control - use factory pattern for instantiation
         self.controller_method = controller_method.lower()
+        factory = ControllerFactory(config=config)
+
+        # Create controller with appropriate parameters
+        controller_params = {"kp": kp, "kd": kd}
         if self.controller_method == "pid":
-            self.controller = PIDController(kp=kp, ki=ki, kd=kd)
-        else:  # Default to PD
-            self.controller = PDController(kp=kp, kd=kd)
+            controller_params["ki"] = ki
+
+        self.controller: SteeringController = factory.create(
+            controller_type=self.controller_method,
+            **controller_params
+        )
 
         # Adaptive throttle policy
         self.throttle_policy = throttle_policy or {

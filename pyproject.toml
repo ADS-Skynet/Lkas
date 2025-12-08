@@ -74,7 +74,7 @@ train = [
 ]
 
 # All optional dependencies
-all = ["skynet-ads[dev,train]"]
+all = ["skynet-lkas[dev,train]"]
 
 # [project.urls]
 # Homepage = "https://github.com/ADS-Skynet"
@@ -167,7 +167,6 @@ ignore_missing_imports = true
 
 # pyright/pylance type checker configuration
 [tool.pyright]
-include = ["src"]
-extraPaths = ["src"]
+include = ["lkas/src"]
 pythonVersion = "3.10"
 pythonPlatform = "Linux"

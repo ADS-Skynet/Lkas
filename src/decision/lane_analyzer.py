@@ -7,7 +7,7 @@ import numpy as np
 from typing import Tuple, Dict
 from enum import Enum
 
-from lkas.detection.core.models import Lane, LaneMetrics, LaneDepartureStatus
+from common.types.models import Lane, LaneMetrics, LaneDepartureStatus
 
 
 class LaneAnalyzer:

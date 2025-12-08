@@ -7,9 +7,9 @@ Standalone detector that processes images and returns lane detection results.
 import numpy as np
 import time
 
-from lkas.integration.messages import ImageMessage, DetectionMessage, LaneMessage
+from lkas.integration.shared_memory.messages import ImageMessage, DetectionMessage, LaneMessage
 from lkas.detection.core.factory import DetectorFactory
-from skynet_common.config import Config
+from common.config import Config
 
 
 class LaneDetection:

@@ -3,7 +3,7 @@ LKAS Constants
 
 Lane Keeping Assist System specific constants.
 Module-specific configuration values and type identifiers.
-Common configuration values are in skynet_common.config.
+Common configuration values are in common.config.
 """
 
 
