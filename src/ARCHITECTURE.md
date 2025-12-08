@@ -1,17 +1,17 @@
-# LKAS Server Architecture (Refactored)
+# LKAS Server Architecture
 
 ## Component Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        LKASServer                            │
-│                     (Orchestrator)                           │
-│                                                              │
-│  Responsibilities:                                           │
-│  • Configuration management                                  │
-│  • Lifecycle orchestration                                   │
-│  • Signal handling                                           │
-│  • Terminal display coordination                             │
+│                        LKASServer                           │
+│                     (Orchestrator)                          │
+│                                                             │
+│  Responsibilities:                                          │
+│  • Configuration management                                 │
+│  • Lifecycle orchestration                                  │
+│  • Signal handling                                          │
+│  • Terminal display coordination                            │
 └────┬──────────────────────┬──────────────────────┬──────────┘
      │                      │                      │
      │                      │                      │
@@ -20,11 +20,11 @@
 │Detection │      │  Decision    │      │   Broadcast     │
 │Process   │      │  Process     │      │   Manager       │
 │Manager   │      │  Manager     │      │   (Optional)    │
-└────┬─────┘      └──────┬───────┘      └────────┬────────┘
-     │                   │                       │
-     │extends            │extends                │uses
-     │                   │                       │
-     ▼                   ▼                       │
+└────┬─────┘      └──────┬───────┘      └───────┬─────────┘
+     │                   │                      │
+     │extends            │extends               │uses
+     │                   │                      │
+     ▼                   ▼                      │
 ┌────────────────────────────────────┐          │
 │      ProcessManager (ABC)          │          │
 │                                    │          │
@@ -39,14 +39,14 @@
 │  • get_process_name()              │          │
 │  • check_initialization_marker()   │          │
 └────────────────────────────────────┘          │
-                                                 │
-                                                 ▼
+                                                │
+                                                ▼
                                     ┌────────────────────────┐
-                                    │  ZMQ Broker           │
-                                    │  Shared Memory        │
-                                    │  - Image Channel      │
-                                    │  - Detection Channel  │
-                                    │  - Control Channel    │
+                                    │  ZMQ Broker            │
+                                    │  Shared Memory         │
+                                    │  - Image Channel       │
+                                    │  - Detection Channel   │
+                                    │  - Control Channel     │
                                     └────────────────────────┘
 ```
 
