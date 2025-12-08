@@ -111,6 +111,7 @@ class VehicleBroadcaster:
                 'height': image.shape[0],
                 'format': 'jpeg',
                 'jpeg_size': len(buffer),
+                'jpeg_quality': jpeg_quality,  # Include quality for viewer optimization
             }
 
             # Send multipart: [topic, metadata_json, jpeg_data]
