@@ -1,6 +1,9 @@
-"""Deep learning-based lane detection."""
+"""
+Deep Learning Lane Detection Module
 
-from .lane_net_base import LaneNet, SimpleLaneNet, DLLaneDetector as BaseDLLaneDetector
+Provides semantic segmentation-based lane detection using BiSeNet V2.
+"""
+
 from .lane_net import DLLaneDetector
 
-__all__ = ['LaneNet', 'SimpleLaneNet', 'DLLaneDetector', 'BaseDLLaneDetector']
+__all__ = ['DLLaneDetector']

@@ -101,33 +101,45 @@ class SharedDetectionHeader:
     has_left_lane: int
     has_right_lane: int
     ready: int  # 1 if new data available
+    detection_method: int  # 0=cv, 1=dl
+    lanes_json_size: int  # Size of lanes JSON data (0 if none)
+    mask_height: int  # Segmentation mask height (0 if none)
+    mask_width: int  # Segmentation mask width (0 if none)
 
     @staticmethod
     def byte_size():
         """Size in bytes: Calculate actual struct size with padding."""
-        return struct.calcsize('qddiii')
+        return struct.calcsize('qddiiiiiii')
 
     def pack(self) -> bytes:
         """Pack header to bytes."""
-        return struct.pack('qddiii',
+        return struct.pack('qddiiiiiii',
                           self.frame_id,
                           self.timestamp,
                           self.processing_time_ms,
                           self.has_left_lane,
                           self.has_right_lane,
-                          self.ready)
+                          self.ready,
+                          self.detection_method,
+                          self.lanes_json_size,
+                          self.mask_height,
+                          self.mask_width)
 
     @staticmethod
     def unpack(data: bytes) -> 'SharedDetectionHeader':
         """Unpack header from bytes."""
-        values = struct.unpack('qddiii', data)
+        values = struct.unpack('qddiiiiiii', data)
         return SharedDetectionHeader(
             frame_id=values[0],
             timestamp=values[1],
             processing_time_ms=values[2],
             has_left_lane=values[3],
             has_right_lane=values[4],
-            ready=values[5]
+            ready=values[5],
+            detection_method=values[6],
+            lanes_json_size=values[7],
+            mask_height=values[8],
+            mask_width=values[9]
         )
 
 
@@ -421,8 +433,14 @@ class SharedMemoryDetectionChannel:
     High-performance shared memory channel for detection results.
 
     Memory Layout:
-        [Header: 40 bytes][Left Lane: 24 bytes][Right Lane: 24 bytes]
+        [Header: 56 bytes][Left Lane: 24 bytes][Right Lane: 24 bytes][Lanes JSON: 64KB][Mask: ~1MB]
     """
+
+    # Maximum size for lanes JSON data (64KB should be plenty for lane contours)
+    LANES_JSON_MAX_SIZE = 65536
+
+    # Maximum size for segmentation mask (720 * 1280 = 921,600 bytes for typical image)
+    MASK_MAX_SIZE = 1280 * 720  # ~1MB for single-channel mask
 
     def __init__(self, name: str, create: bool = True, retry_count: int = 10, retry_delay: float = 0.5):
         """
@@ -441,7 +459,9 @@ class SharedMemoryDetectionChannel:
         # Calculate sizes
         self.header_size = SharedDetectionHeader.byte_size()
         self.lane_size = SharedLane.byte_size()
-        self.total_size = self.header_size + 2 * self.lane_size  # header + 2 lanes
+        self.lanes_json_offset = self.header_size + 2 * self.lane_size
+        self.mask_offset = self.lanes_json_offset + self.LANES_JSON_MAX_SIZE
+        self.total_size = self.mask_offset + self.MASK_MAX_SIZE
 
         # Create or connect to shared memory with retry logic
         if create:
@@ -487,6 +507,8 @@ class SharedMemoryDetectionChannel:
         self.header_view = self.shm.buf[:self.header_size]
         self.left_lane_view = self.shm.buf[self.header_size:self.header_size + self.lane_size]
         self.right_lane_view = self.shm.buf[self.header_size + self.lane_size:self.header_size + 2 * self.lane_size]
+        self.lanes_json_view = self.shm.buf[self.lanes_json_offset:self.lanes_json_offset + self.LANES_JSON_MAX_SIZE]
+        self.mask_view = self.shm.buf[self.mask_offset:self.mask_offset + self.MASK_MAX_SIZE]
 
         # Synchronization
         self.lock = Lock()
@@ -501,6 +523,10 @@ class SharedMemoryDetectionChannel:
                 del self.left_lane_view
             if hasattr(self, 'right_lane_view'):
                 del self.right_lane_view
+            if hasattr(self, 'lanes_json_view'):
+                del self.lanes_json_view
+            if hasattr(self, 'mask_view'):
+                del self.mask_view
         except Exception:
             pass
 
@@ -529,6 +555,41 @@ class SharedMemoryDetectionChannel:
             detection: Detection message
         """
         with self.lock:
+            # Serialize lanes to JSON if available
+            lanes_json_size = 0
+            if detection.lanes:
+                lanes_data = [
+                    {
+                        'points': lane.points,
+                        'class_id': lane.class_id,
+                        'confidence': lane.confidence
+                    }
+                    for lane in detection.lanes
+                ]
+                lanes_json = json.dumps(lanes_data).encode('utf-8')
+                lanes_json_size = len(lanes_json)
+                if lanes_json_size <= self.LANES_JSON_MAX_SIZE:
+                    self.lanes_json_view[:lanes_json_size] = lanes_json
+                else:
+                    # Truncate if too large (shouldn't happen normally)
+                    lanes_json_size = 0
+
+            # Handle segmentation mask
+            mask_height = 0
+            mask_width = 0
+            if detection.segmentation_mask is not None:
+                mask = detection.segmentation_mask
+                mask_height, mask_width = mask.shape[:2]
+                mask_size = mask_height * mask_width
+                if mask_size <= self.MASK_MAX_SIZE:
+                    # Debug: Log mask stats before writing (once)
+                    if not hasattr(self, '_write_mask_debug_logged'):
+                        nonzero = np.count_nonzero(mask)
+                        print(f"[SHM Write Debug] Mask: shape={mask.shape}, nonzero={nonzero}, max={mask.max()}")
+                        self._write_mask_debug_logged = True
+                    # Write mask data as flat bytes
+                    self.mask_view[:mask_size] = mask.flatten().tobytes()
+
             # Write header
             header = SharedDetectionHeader(
                 frame_id=detection.frame_id,
@@ -536,7 +597,11 @@ class SharedMemoryDetectionChannel:
                 processing_time_ms=detection.processing_time_ms,
                 has_left_lane=1 if detection.left_lane else 0,
                 has_right_lane=1 if detection.right_lane else 0,
-                ready=1
+                ready=1,
+                detection_method=1 if detection.detection_method == 'dl' else 0,
+                lanes_json_size=lanes_json_size,
+                mask_height=mask_height,
+                mask_width=mask_width
             )
             self.header_view[:] = header.pack()
 
@@ -576,6 +641,45 @@ class SharedMemoryDetectionChannel:
                 right = SharedLane.unpack(bytes(self.right_lane_view))
                 right_lane = right.to_lane_message()
 
+            # Read lanes JSON data (DL detection)
+            lanes = None
+            if header.lanes_json_size > 0 and header.lanes_json_size <= self.LANES_JSON_MAX_SIZE:
+                try:
+                    lanes_json = bytes(self.lanes_json_view[:header.lanes_json_size]).decode('utf-8')
+                    lanes_data = json.loads(lanes_json)
+                    # Convert to LaneContour objects
+                    from .messages import LaneContour
+                    lanes = [
+                        LaneContour(
+                            points=lane['points'],
+                            class_id=lane['class_id'],
+                            confidence=lane['confidence']
+                        )
+                        for lane in lanes_data
+                    ]
+                except (json.JSONDecodeError, UnicodeDecodeError, KeyError) as e:
+                    # Stale/corrupted data in shared memory - ignore lanes
+                    lanes = None
+
+            # Read segmentation mask (DL detection)
+            segmentation_mask = None
+            if header.mask_height > 0 and header.mask_width > 0:
+                mask_size = header.mask_height * header.mask_width
+                if mask_size <= self.MASK_MAX_SIZE:
+                    try:
+                        mask_bytes = bytes(self.mask_view[:mask_size])
+                        segmentation_mask = np.frombuffer(mask_bytes, dtype=np.uint8).reshape(
+                            (header.mask_height, header.mask_width)
+                        ).copy()  # Copy to avoid shared memory buffer issues
+                        # Debug: Log mask stats after reading (once)
+                        if not hasattr(self, '_read_mask_debug_logged'):
+                            nonzero = np.count_nonzero(segmentation_mask)
+                            print(f"[SHM Read Debug] Mask: shape={segmentation_mask.shape}, nonzero={nonzero}, max={segmentation_mask.max()}")
+                            self._read_mask_debug_logged = True
+                    except (ValueError, TypeError):
+                        # Corrupted mask data - ignore
+                        segmentation_mask = None
+
             # Mark as consumed (optional)
             # header.ready = 0
             # self.header_view[:] = header.pack()
@@ -586,7 +690,10 @@ class SharedMemoryDetectionChannel:
                 processing_time_ms=header.processing_time_ms,
                 frame_id=header.frame_id,
                 timestamp=header.timestamp,
-                debug_image=None  # Not transmitted via shared memory (too large)
+                debug_image=None,  # Not transmitted via shared memory (too large)
+                segmentation_mask=segmentation_mask,
+                detection_method='dl' if header.detection_method == 1 else 'cv',
+                lanes=lanes
             )
 
     def close(self):
@@ -599,6 +706,10 @@ class SharedMemoryDetectionChannel:
                 del self.left_lane_view
             if hasattr(self, 'right_lane_view'):
                 del self.right_lane_view
+            if hasattr(self, 'lanes_json_view'):
+                del self.lanes_json_view
+            if hasattr(self, 'mask_view'):
+                del self.mask_view
         except Exception:
             pass
 

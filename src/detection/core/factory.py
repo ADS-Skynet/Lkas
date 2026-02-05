@@ -78,54 +78,23 @@ class DetectorFactory:
         return CVLaneDetector(**params)
 
     def _create_dl_detector(self, **kwargs) -> LaneDetector:
-        """Create Deep Learning detector (PyTorch or Keras based on config)."""
+        """Create Deep Learning detector (BiSeNet V2 with PyTorch)."""
         cfg = self.config.dl_detector
 
-        # Get framework from kwargs or config
-        framework = kwargs.get("framework", cfg.framework).lower()
+        from lkas.detection.method.deep_learning.lane_net import DLLaneDetector
 
-        if framework == "pytorch":
-            # Import PyTorch detector
-            from lkas.detection.method.deep_learning.lane_net import DLLaneDetector
+        params = {
+            "model_type": kwargs.get("model_type", cfg.model_type),
+            "input_size": kwargs.get("input_size", cfg.input_size),
+            "threshold": kwargs.get("threshold", cfg.threshold),
+            "device": kwargs.get("device", cfg.device),
+            "model_path": kwargs.get("model_path", cfg.model_path),
+            "n_classes": kwargs.get("n_classes", cfg.n_classes),
+            "smoothing_factor": kwargs.get("smoothing_factor", cfg.smoothing_factor),
+            "use_fp16": kwargs.get("use_fp16", cfg.use_fp16),
+        }
 
-            params = {
-                "model_type": kwargs.get("model_type", cfg.model_type),
-                "input_size": kwargs.get("input_size", cfg.input_size),
-                "threshold": kwargs.get("threshold", cfg.threshold),
-                "device": kwargs.get("device", cfg.device),
-                "model_path": kwargs.get("model_path", cfg.model_path),
-            }
-
-            return DLLaneDetector(**params)
-
-        elif framework == "keras":
-            # Import Keras detector
-            from lkas.detection.method.deep_learning.keras_lane_detector import KerasLaneDetector
-
-            params = {
-                "model_path": kwargs.get("model_path", cfg.model_path),
-                "input_size": kwargs.get("input_size", cfg.input_size),
-                "threshold": kwargs.get("threshold", cfg.threshold),
-            }
-
-            return KerasLaneDetector(**params)
-
-        elif framework == "tflite":
-            # Import TFLite detector
-            from lkas.detection.method.deep_learning.tflite_lane_detector import TFLiteLaneDetector
-
-            params = {
-                "model_path": kwargs.get("model_path", cfg.model_path),
-                "input_size": kwargs.get("input_size", cfg.input_size),
-                "threshold": kwargs.get("threshold", cfg.threshold),
-            }
-
-            return TFLiteLaneDetector(**params)
-
-        else:
-            raise ValueError(
-                f"Unknown framework: {framework}. Use 'pytorch', 'keras', or 'tflite'."
-            )
+        return DLLaneDetector(**params)
 
     @staticmethod
     def list_available_detectors() -> list:
