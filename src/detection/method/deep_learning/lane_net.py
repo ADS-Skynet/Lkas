@@ -72,8 +72,8 @@ class DLLaneDetector(LaneDetector):
             self.device = torch.device(device)
 
         # FP16 only works on CUDA
-        # TEMPORARILY DISABLED: FP16 causing numerical issues (class1 prob=0)
-        self.use_fp16 = False  # use_fp16 and self.device.type == "cuda"
+        # self.use_fp16 = use_fp16 and self.device.type == "cuda"
+        self.use_fp16 = False
 
         # Load model
         self._load_model()
@@ -164,9 +164,14 @@ class DLLaneDetector(LaneDetector):
             outputs = self.model(img_tensor)
             logits = outputs[0]  # (1, C, H, W)
 
+            # CRITICAL: Convert to FP32 before argmax to avoid FP16 precision issues
+            # FP16 can cause small probability values to become 0, breaking argmax
+            if self.use_fp16:
+                logits = logits.float()
+
         # Debug: Log model output stats once
         if not hasattr(self, '_model_output_debug_logged'):
-            print(f"[DL Debug] logits shape={logits.shape}, min={logits.min().item():.4f}, max={logits.max().item():.4f}")
+            print(f"[DL Debug] logits shape={logits.shape}, dtype={logits.dtype}, min={logits.min().item():.4f}, max={logits.max().item():.4f}")
             # Check class probabilities
             probs = torch.softmax(logits, dim=1)
             print(f"[DL Debug] probs: class0 max={probs[0,0].max().item():.4f}, class1 max={probs[0,1].max().item():.4f}")

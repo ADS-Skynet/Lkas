@@ -201,6 +201,11 @@ class ControlMessage:
     lane_width_pixels: float | None = None
     departure_status: str | None = None
 
+    # Debug polynomial coefficients for viewer overlay (x = ay^2 + by + c)
+    left_poly: tuple | None = None    # (a, b, c) or None
+    right_poly: tuple | None = None   # (a, b, c) or None
+    center_poly: tuple | None = None  # (a, b, c) or None
+
     def clamp_values(self):
         """Ensure all control values are within valid ranges."""
         self.steering = max(-1.0, min(1.0, self.steering))

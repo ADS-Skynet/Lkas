@@ -268,11 +268,19 @@ class BroadcastManager:
             detection_data['heading_angle_deg'] = control_msg.heading_angle
             detection_data['lane_width_pixels'] = control_msg.lane_width_pixels
             detection_data['departure_status'] = control_msg.departure_status
+
+            # Debug polynomial coefficients for viewer overlay
+            detection_data['left_poly'] = list(control_msg.left_poly) if control_msg.left_poly else None
+            detection_data['right_poly'] = list(control_msg.right_poly) if control_msg.right_poly else None
+            detection_data['center_poly'] = list(control_msg.center_poly) if control_msg.center_poly else None
         else:
             detection_data['lateral_offset_meters'] = None
             detection_data['heading_angle_deg'] = None
             detection_data['lane_width_pixels'] = None
             detection_data['departure_status'] = None
+            detection_data['left_poly'] = None
+            detection_data['right_poly'] = None
+            detection_data['center_poly'] = None
 
             if self.verbose and detection_msg.frame_id % self.broadcast_log_interval == 0:
                 self.terminal.print(f"[Broker] Warning: No control data for frame {detection_msg.frame_id}")

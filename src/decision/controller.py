@@ -12,6 +12,7 @@ from lkas.integration.shared_memory.messages import (
     ControlMode,
 )
 from lkas.decision.lane_analyzer import LaneAnalyzer
+from lkas.decision.segmentation_lane_parser import SegmentationLaneParser
 from lkas.decision.core.factory import ControllerFactory
 from lkas.decision.core.interfaces import SteeringController
 
@@ -55,8 +56,14 @@ class DecisionController:
                 - steer_max: Maximum steering for throttle calculation (default: 0.70)
             config: Optional system configuration object
         """
-        # Lane analysis
+        # Lane analysis (CV detection path)
         self.analyzer = LaneAnalyzer(image_width=image_width, image_height=image_height)
+
+        # Segmentation lane parser (DL detection path)
+        self.seg_parser = SegmentationLaneParser(
+            image_width=image_width,
+            image_height=image_height,
+        )
 
         # Steering control - use factory pattern for instantiation
         self.controller_method = controller_method.lower()
@@ -66,6 +73,9 @@ class DecisionController:
         controller_params = {"kp": kp, "kd": kd}
         if self.controller_method == "pid":
             controller_params["ki"] = ki
+        elif self.controller_method == "pure_pursuit":
+            controller_params["image_width"] = image_width
+            controller_params["image_height"] = image_height
 
         self.controller: SteeringController = factory.create(
             controller_type=self.controller_method,
@@ -123,36 +133,48 @@ class DecisionController:
         """
         Process detection results and generate control commands.
 
+        Handles two detection paths:
+        - DL detection: Parse segmentation mask via SegmentationLaneParser,
+          optionally provide center path polynomial to Pure Pursuit controller
+        - CV detection: Use traditional LaneAnalyzer with left/right lane endpoints
+
         Args:
             detection: Lane detection message
 
         Returns:
             Control message with steering, throttle, brake commands
         """
-        # Convert detection message lanes to internal format
-        left_lane = None
-        right_lane = None
+        if detection.detection_method == "dl" and detection.segmentation_mask is not None:
+            # DL path: parse segmentation mask into polynomial lane boundaries
+            metrics = self.seg_parser.parse(detection.segmentation_mask)
 
-        if detection.left_lane:
-            left_lane = (
-                detection.left_lane.x1,
-                detection.left_lane.y1,
-                detection.left_lane.x2,
-                detection.left_lane.y2,
-            )
+            # Provide center path polynomial to pure pursuit controller
+            if hasattr(self.controller, 'set_path'):
+                self.controller.set_path(self.seg_parser.get_center_poly())
+        else:
+            # CV path: use traditional lane analyzer with two-endpoint lanes
+            left_lane = None
+            right_lane = None
 
-        if detection.right_lane:
-            right_lane = (
-                detection.right_lane.x1,
-                detection.right_lane.y1,
-                detection.right_lane.x2,
-                detection.right_lane.y2,
-            )
+            if detection.left_lane:
+                left_lane = (
+                    detection.left_lane.x1,
+                    detection.left_lane.y1,
+                    detection.left_lane.x2,
+                    detection.left_lane.y2,
+                )
 
-        # Analyze lanes to get metrics
-        metrics = self.analyzer.get_metrics(left_lane, right_lane)
+            if detection.right_lane:
+                right_lane = (
+                    detection.right_lane.x1,
+                    detection.right_lane.y1,
+                    detection.right_lane.x2,
+                    detection.right_lane.y2,
+                )
 
-        # Compute steering from metrics
+            metrics = self.analyzer.get_metrics(left_lane, right_lane)
+
+        # Compute steering from metrics (works with any controller)
         steering = self.controller.compute_steering(metrics)
 
         # If no steering computed (e.g., no lanes detected), use safe default
@@ -169,6 +191,21 @@ class DecisionController:
                 throttle = self.default_throttle
             brake = self.default_brake
 
+        # Collect polynomial coefficients for debug overlay
+        left_poly = None
+        right_poly = None
+        center_poly = None
+        if detection.detection_method == "dl" and detection.segmentation_mask is not None:
+            lp = self.seg_parser._left_poly
+            rp = self.seg_parser._right_poly
+            cp = self.seg_parser._center_poly
+            if lp is not None:
+                left_poly = tuple(lp)
+            if rp is not None:
+                right_poly = tuple(rp)
+            if cp is not None:
+                center_poly = tuple(cp)
+
         # Create control message with complete metrics
         control = ControlMessage(
             steering=steering,
@@ -180,6 +217,9 @@ class DecisionController:
             heading_angle=metrics.heading_angle_deg,
             lane_width_pixels=metrics.lane_width_pixels,
             departure_status=metrics.departure_status.value if metrics.departure_status else None,
+            left_poly=left_poly,
+            right_poly=right_poly,
+            center_poly=center_poly,
         )
 
         # Ensure values are clamped
@@ -231,20 +271,15 @@ class DecisionController:
 
     def reset_state(self):
         """
-        Reset controller state (PID error accumulation and derivative).
+        Reset controller and parser state.
 
         Used when:
             - User presses reset button
             - Starting a new session
             - After significant disturbance
-
-        Only affects PID controller (PD controller has no state to reset).
         """
-        if self.controller_method == "pid":
-            self.controller.reset_state()
-            # print("✓ PID controller state reset (integral and derivative cleared)")
-        # else:
-            # print("ℹ PD controller has no state to reset")
+        self.controller.reset_state()
+        self.seg_parser.reset()
 
     def update_parameter(self, param_name: str, value: float) -> bool:
         """
@@ -267,6 +302,7 @@ class DecisionController:
             'kp': (0.0, 2.0),              # Proportional gain
             'ki': (0.0, 0.5),              # Integral gain (PID only)
             'kd': (0.0, 1.0),              # Derivative gain
+            'lookahead_ratio': (0.1, 0.8), # Pure Pursuit lookahead (fraction of image height)
             'throttle_base': (0.0, 1.0),   # Base throttle
             'throttle_min': (0.0, 1.0),    # Minimum throttle
             'steer_threshold': (0.0, 1.0), # Steering threshold
@@ -295,6 +331,12 @@ class DecisionController:
 
         elif param_name == 'kd':
             self.controller.kd = float(value)
+        elif param_name == 'lookahead_ratio':
+            if hasattr(self.controller, 'lookahead_ratio'):
+                self.controller.lookahead_ratio = float(value)
+            else:
+                print(f"⚠ Parameter 'lookahead_ratio' is only valid for Pure Pursuit controller")
+                return False
         elif param_name == 'throttle_base':
             self.throttle_policy['base'] = float(value)
         elif param_name == 'throttle_min':

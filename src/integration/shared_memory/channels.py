@@ -839,7 +839,7 @@ class SharedControlData:
     """
     Control command data.
 
-    Memory layout (88 bytes):
+    Memory layout (160 bytes):
     - steering: 8 bytes (double) - Range [-1.0, 1.0]
     - throttle: 8 bytes (double) - Range [0.0, 1.0]
     - brake: 8 bytes (double) - Range [0.0, 1.0]
@@ -847,6 +847,9 @@ class SharedControlData:
     - lateral_offset_meters: 8 bytes (double) - Lateral offset in meters
     - heading_angle: 8 bytes (double) - Heading angle in degrees
     - lane_width_pixels: 8 bytes (double) - Lane width in pixels
+    - left_poly (a,b,c): 24 bytes - Left boundary polynomial x=f(y) (NaN = unavailable)
+    - right_poly (a,b,c): 24 bytes - Right boundary polynomial x=f(y) (NaN = unavailable)
+    - center_poly (a,b,c): 24 bytes - Center path polynomial x=f(y) (NaN = unavailable)
     - departure_status: 32 bytes (string) - Lane departure status string
     """
     steering: float
@@ -856,15 +859,29 @@ class SharedControlData:
     lateral_offset_meters: float
     heading_angle: float
     lane_width_pixels: float
-    departure_status: str
+    # Debug polynomial coefficients for viewer overlay (NaN = not available)
+    left_poly_a: float = float('nan')
+    left_poly_b: float = float('nan')
+    left_poly_c: float = float('nan')
+    right_poly_a: float = float('nan')
+    right_poly_b: float = float('nan')
+    right_poly_c: float = float('nan')
+    center_poly_a: float = float('nan')
+    center_poly_b: float = float('nan')
+    center_poly_c: float = float('nan')
+    departure_status: str = ''
+
+    # Struct format: 16 doubles + 32-byte string
+    _FORMAT = 'dddddddddddddddd32s'
 
     @staticmethod
     def byte_size():
-        """Size in bytes: 7 doubles + 32 char string = 88 bytes"""
-        return struct.calcsize('ddddddd32s')
+        """Size in bytes: 16 doubles + 32 char string = 160 bytes"""
+        return struct.calcsize('dddddddddddddddd32s')
 
     def pack(self) -> bytes:
         """Pack control data to bytes."""
+        import math
         # Convert None to 0.0 for numeric fields
         lateral_offset_m = self.lateral_offset_meters if self.lateral_offset_meters is not None else 0.0
         heading = self.heading_angle if self.heading_angle is not None else 0.0
@@ -875,7 +892,7 @@ class SharedControlData:
         status_bytes = status_bytes.ljust(32, b'\x00')
 
         return struct.pack(
-            'ddddddd32s',
+            self._FORMAT,
             self.steering,
             self.throttle,
             self.brake,
@@ -883,16 +900,20 @@ class SharedControlData:
             lateral_offset_m,
             heading,
             lane_width,
+            self.left_poly_a, self.left_poly_b, self.left_poly_c,
+            self.right_poly_a, self.right_poly_b, self.right_poly_c,
+            self.center_poly_a, self.center_poly_b, self.center_poly_c,
             status_bytes
         )
 
     @staticmethod
     def unpack(data: bytes) -> 'SharedControlData':
         """Unpack control data from bytes."""
-        values = struct.unpack('ddddddd32s', data)
+        import math
+        values = struct.unpack(SharedControlData._FORMAT, data)
 
         # Decode status string
-        status_str = values[7].rstrip(b'\x00').decode('utf-8') if values[7] else None
+        status_str = values[16].rstrip(b'\x00').decode('utf-8') if values[16] else None
 
         return SharedControlData(
             steering=values[0],
@@ -902,11 +923,21 @@ class SharedControlData:
             lateral_offset_meters=values[4] if values[4] != 0.0 else None,
             heading_angle=values[5] if values[5] != 0.0 else None,
             lane_width_pixels=values[6] if values[6] != 0.0 else None,
+            left_poly_a=values[7], left_poly_b=values[8], left_poly_c=values[9],
+            right_poly_a=values[10], right_poly_b=values[11], right_poly_c=values[12],
+            center_poly_a=values[13], center_poly_b=values[14], center_poly_c=values[15],
             departure_status=status_str
         )
 
     def to_control_message(self, frame_id: int, timestamp: float, mode: ControlMode) -> ControlMessage:
         """Convert to ControlMessage."""
+        import math
+
+        def _poly_or_none(a, b, c):
+            if math.isnan(a) or math.isnan(b) or math.isnan(c):
+                return None
+            return (a, b, c)
+
         return ControlMessage(
             steering=self.steering,
             throttle=self.throttle,
@@ -916,12 +947,20 @@ class SharedControlData:
             lateral_offset_meters=self.lateral_offset_meters,
             heading_angle=self.heading_angle,
             lane_width_pixels=self.lane_width_pixels,
-            departure_status=self.departure_status
+            departure_status=self.departure_status,
+            left_poly=_poly_or_none(self.left_poly_a, self.left_poly_b, self.left_poly_c),
+            right_poly=_poly_or_none(self.right_poly_a, self.right_poly_b, self.right_poly_c),
+            center_poly=_poly_or_none(self.center_poly_a, self.center_poly_b, self.center_poly_c),
         )
 
     @staticmethod
     def from_control_message(control: ControlMessage) -> 'SharedControlData':
         """Create from ControlMessage."""
+        nan = float('nan')
+        lp = control.left_poly or (nan, nan, nan)
+        rp = control.right_poly or (nan, nan, nan)
+        cp = control.center_poly or (nan, nan, nan)
+
         return SharedControlData(
             steering=control.steering,
             throttle=control.throttle,
@@ -930,6 +969,9 @@ class SharedControlData:
             lateral_offset_meters=control.lateral_offset_meters,
             heading_angle=control.heading_angle,
             lane_width_pixels=control.lane_width_pixels,
+            left_poly_a=lp[0], left_poly_b=lp[1], left_poly_c=lp[2],
+            right_poly_a=rp[0], right_poly_b=rp[1], right_poly_c=rp[2],
+            center_poly_a=cp[0], center_poly_b=cp[1], center_poly_c=cp[2],
             departure_status=control.departure_status
         )
 
@@ -967,7 +1009,7 @@ class SharedMemoryControlChannel:
     High-performance shared memory channel for control commands.
 
     Memory Layout:
-        [Header: 48 bytes][Control Data: 88 bytes] = 136 bytes total
+        [Header: 48 bytes][Control Data: 160 bytes] = 208 bytes total
 
     Usage:
         # Writer (Decision Process)
