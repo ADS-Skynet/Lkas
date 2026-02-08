@@ -272,6 +272,9 @@ class BroadcastManager:
             detection_data['left_poly'] = list(control_msg.left_poly) if control_msg.left_poly else None
             detection_data['right_poly'] = list(control_msg.right_poly) if control_msg.right_poly else None
             detection_data['center_poly'] = list(control_msg.center_poly) if control_msg.center_poly else None
+            # Lane boundary confidence scores
+            detection_data['left_confidence'] = control_msg.left_confidence
+            detection_data['right_confidence'] = control_msg.right_confidence
         else:
             detection_data['lateral_offset_meters'] = None
             detection_data['heading_angle_deg'] = None
@@ -280,6 +283,8 @@ class BroadcastManager:
             detection_data['left_poly'] = None
             detection_data['right_poly'] = None
             detection_data['center_poly'] = None
+            detection_data['left_confidence'] = 0.0
+            detection_data['right_confidence'] = 0.0
 
             if self.verbose and detection_msg.frame_id % self.broadcast_log_interval == 0:
                 self.terminal.print(f"[Broker] Warning: No control data for frame {detection_msg.frame_id}")

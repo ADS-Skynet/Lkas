@@ -206,6 +206,10 @@ class ControlMessage:
     right_poly: tuple | None = None   # (a, b, c) or None
     center_poly: tuple | None = None  # (a, b, c) or None
 
+    # Lane boundary confidence scores [0, 1] (fit_quality * coverage)
+    left_confidence: float = 0.0
+    right_confidence: float = 0.0
+
     def clamp_values(self):
         """Ensure all control values are within valid ranges."""
         self.steering = max(-1.0, min(1.0, self.steering))

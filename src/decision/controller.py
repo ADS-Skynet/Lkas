@@ -197,10 +197,12 @@ class DecisionController:
                 throttle = self.default_throttle
             brake = self.default_brake
 
-        # Collect polynomial coefficients for debug overlay
+        # Collect polynomial coefficients and confidence for debug overlay
         left_poly = None
         right_poly = None
         center_poly = None
+        left_conf = 0.0
+        right_conf = 0.0
         if detection.detection_method == "dl" and detection.segmentation_mask is not None:
             lp = self.seg_parser._left_poly
             rp = self.seg_parser._right_poly
@@ -211,6 +213,7 @@ class DecisionController:
                 right_poly = tuple(rp)
             if cp is not None:
                 center_poly = tuple(cp)
+            left_conf, right_conf = self.seg_parser.get_confidences()
 
         # Create control message with complete metrics
         control = ControlMessage(
@@ -226,6 +229,8 @@ class DecisionController:
             left_poly=left_poly,
             right_poly=right_poly,
             center_poly=center_poly,
+            left_confidence=left_conf,
+            right_confidence=right_conf,
         )
 
         # Ensure values are clamped

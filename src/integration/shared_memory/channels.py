@@ -853,7 +853,7 @@ class SharedControlData:
     """
     Control command data.
 
-    Memory layout (160 bytes):
+    Memory layout (176 bytes):
     - steering: 8 bytes (double) - Range [-1.0, 1.0]
     - throttle: 8 bytes (double) - Range [0.0, 1.0]
     - brake: 8 bytes (double) - Range [0.0, 1.0]
@@ -861,6 +861,8 @@ class SharedControlData:
     - lateral_offset_meters: 8 bytes (double) - Lateral offset in meters
     - heading_angle: 8 bytes (double) - Heading angle in degrees
     - lane_width_pixels: 8 bytes (double) - Lane width in pixels
+    - left_confidence: 8 bytes (double) - Left boundary confidence [0, 1]
+    - right_confidence: 8 bytes (double) - Right boundary confidence [0, 1]
     - left_poly (a,b,c): 24 bytes - Left boundary polynomial x=f(y) (NaN = unavailable)
     - right_poly (a,b,c): 24 bytes - Right boundary polynomial x=f(y) (NaN = unavailable)
     - center_poly (a,b,c): 24 bytes - Center path polynomial x=f(y) (NaN = unavailable)
@@ -873,6 +875,9 @@ class SharedControlData:
     lateral_offset_meters: float
     heading_angle: float
     lane_width_pixels: float
+    # Lane boundary confidence scores
+    left_confidence: float = 0.0
+    right_confidence: float = 0.0
     # Debug polynomial coefficients for viewer overlay (NaN = not available)
     left_poly_a: float = float('nan')
     left_poly_b: float = float('nan')
@@ -885,13 +890,13 @@ class SharedControlData:
     center_poly_c: float = float('nan')
     departure_status: str = ''
 
-    # Struct format: 16 doubles + 32-byte string
-    _FORMAT = 'dddddddddddddddd32s'
+    # Struct format: 18 doubles + 32-byte string
+    _FORMAT = 'dddddddddddddddddd32s'
 
     @staticmethod
     def byte_size():
-        """Size in bytes: 16 doubles + 32 char string = 160 bytes"""
-        return struct.calcsize('dddddddddddddddd32s')
+        """Size in bytes: 18 doubles + 32 char string = 176 bytes"""
+        return struct.calcsize('dddddddddddddddddd32s')
 
     def pack(self) -> bytes:
         """Pack control data to bytes."""
@@ -914,6 +919,8 @@ class SharedControlData:
             lateral_offset_m,
             heading,
             lane_width,
+            self.left_confidence,
+            self.right_confidence,
             self.left_poly_a, self.left_poly_b, self.left_poly_c,
             self.right_poly_a, self.right_poly_b, self.right_poly_c,
             self.center_poly_a, self.center_poly_b, self.center_poly_c,
@@ -927,7 +934,7 @@ class SharedControlData:
         values = struct.unpack(SharedControlData._FORMAT, data)
 
         # Decode status string
-        status_str = values[16].rstrip(b'\x00').decode('utf-8') if values[16] else None
+        status_str = values[18].rstrip(b'\x00').decode('utf-8') if values[18] else None
 
         return SharedControlData(
             steering=values[0],
@@ -937,9 +944,11 @@ class SharedControlData:
             lateral_offset_meters=values[4] if values[4] != 0.0 else None,
             heading_angle=values[5] if values[5] != 0.0 else None,
             lane_width_pixels=values[6] if values[6] != 0.0 else None,
-            left_poly_a=values[7], left_poly_b=values[8], left_poly_c=values[9],
-            right_poly_a=values[10], right_poly_b=values[11], right_poly_c=values[12],
-            center_poly_a=values[13], center_poly_b=values[14], center_poly_c=values[15],
+            left_confidence=values[7],
+            right_confidence=values[8],
+            left_poly_a=values[9], left_poly_b=values[10], left_poly_c=values[11],
+            right_poly_a=values[12], right_poly_b=values[13], right_poly_c=values[14],
+            center_poly_a=values[15], center_poly_b=values[16], center_poly_c=values[17],
             departure_status=status_str
         )
 
@@ -965,6 +974,8 @@ class SharedControlData:
             left_poly=_poly_or_none(self.left_poly_a, self.left_poly_b, self.left_poly_c),
             right_poly=_poly_or_none(self.right_poly_a, self.right_poly_b, self.right_poly_c),
             center_poly=_poly_or_none(self.center_poly_a, self.center_poly_b, self.center_poly_c),
+            left_confidence=self.left_confidence,
+            right_confidence=self.right_confidence,
         )
 
     @staticmethod
@@ -983,6 +994,8 @@ class SharedControlData:
             lateral_offset_meters=control.lateral_offset_meters,
             heading_angle=control.heading_angle,
             lane_width_pixels=control.lane_width_pixels,
+            left_confidence=control.left_confidence,
+            right_confidence=control.right_confidence,
             left_poly_a=lp[0], left_poly_b=lp[1], left_poly_c=lp[2],
             right_poly_a=rp[0], right_poly_b=rp[1], right_poly_c=rp[2],
             center_poly_a=cp[0], center_poly_b=cp[1], center_poly_c=cp[2],
