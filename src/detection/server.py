@@ -132,7 +132,6 @@ class DetectionServer:
         print(f"\nCreating image shared memory '{self.image_shm_name}'...")
         self.image_channel = SharedMemoryImageChannel(
             name=self.image_shm_name,
-            shape=(self.config.camera.height, self.config.camera.width, 3),
             create=True,  # Creator mode - LKAS owns this memory
             retry_count=self.retry_count,
             retry_delay=self.retry_delay,

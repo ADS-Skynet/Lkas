@@ -38,11 +38,13 @@ class SegmentationLaneParser:
         roi_ratio: float = 0.6,
         poly_degree: int = 2,
         min_points: int = 20,
-        smoothing_factor: float = 0.3,
+        smoothing_factor: float = 0.5,
         lane_width_meters: float = 3.7,
         drift_threshold: float = 0.15,
         departure_threshold: float = 0.35,
         row_step: int = 2,
+        camera_offset_x: int = 0,
+        min_confidence: float = 0.3,
     ):
         """
         Args:
@@ -56,6 +58,10 @@ class SegmentationLaneParser:
             drift_threshold: Fraction of lane width for drift warning
             departure_threshold: Fraction of lane width for departure warning
             row_step: Step size for row scanning (skip rows for performance)
+            camera_offset_x: Pixel offset of camera center from vehicle center
+                             (negative = shift reference left)
+            min_confidence: Minimum confidence to accept a boundary [0, 1].
+                           Boundaries below this are treated as noise/track edges.
         """
         self.image_width = image_width
         self.image_height = image_height
@@ -67,14 +73,20 @@ class SegmentationLaneParser:
         self.drift_threshold = drift_threshold
         self.departure_threshold = departure_threshold
         self.row_step = row_step
+        self.camera_offset_x = camera_offset_x
+        self.min_confidence = min_confidence
 
-        self.vehicle_center_x = image_width // 2
+        self.vehicle_center_x = image_width // 2 + camera_offset_x
         self.roi_top = int(image_height * (1 - roi_ratio))
 
         # Fitted polynomial coefficients (updated each frame)
         self._left_poly = None    # x = f(y) for left boundary
         self._right_poly = None   # x = f(y) for right boundary
         self._center_poly = None  # x = f(y) for center path
+
+        # Boundary confidence scores (updated each frame)
+        self._left_confidence = 0.0
+        self._right_confidence = 0.0
 
         # Previous frame polynomials for temporal smoothing
         self._prev_left_poly = None
@@ -97,28 +109,48 @@ class SegmentationLaneParser:
         """
         self._frame_count += 1
 
+        # Adapt to actual mask dimensions (camera may differ from config)
+        h, w = mask.shape[:2]
+        if h != self.image_height or w != self.image_width:
+            self.image_height = h
+            self.image_width = w
+            self.vehicle_center_x = w // 2 + self.camera_offset_x
+            self.roi_top = int(h * (1 - self.roi_ratio))
+
         # 1. Extract boundary points via row scanning
         left_points, right_points = self._extract_boundaries(mask)
 
         has_left = len(left_points) >= self.min_points
         has_right = len(right_points) >= self.min_points
 
-        # 2. Fit polynomials to boundary points
+        # 2. Fit polynomials to boundary points with confidence filtering
         self._left_poly = None
         self._right_poly = None
         self._center_poly = None
 
         if has_left:
             left_y, left_x = left_points[:, 0], left_points[:, 1]
-            self._left_poly = np.polyfit(left_y, left_x, self.poly_degree)
-            self._left_poly = self._smooth_poly(self._left_poly, self._prev_left_poly)
-            self._prev_left_poly = self._left_poly.copy()
+            raw_poly = np.polyfit(left_y, left_x, self.poly_degree)
+            self._left_confidence = self._compute_fit_confidence(left_points, raw_poly)
+            if self._left_confidence >= self.min_confidence:
+                self._left_poly = self._smooth_poly(raw_poly, self._prev_left_poly)
+                self._prev_left_poly = self._left_poly.copy()
+            else:
+                has_left = False
+        else:
+            self._left_confidence = 0.0
 
         if has_right:
             right_y, right_x = right_points[:, 0], right_points[:, 1]
-            self._right_poly = np.polyfit(right_y, right_x, self.poly_degree)
-            self._right_poly = self._smooth_poly(self._right_poly, self._prev_right_poly)
-            self._prev_right_poly = self._right_poly.copy()
+            raw_poly = np.polyfit(right_y, right_x, self.poly_degree)
+            self._right_confidence = self._compute_fit_confidence(right_points, raw_poly)
+            if self._right_confidence >= self.min_confidence:
+                self._right_poly = self._smooth_poly(raw_poly, self._prev_right_poly)
+                self._prev_right_poly = self._right_poly.copy()
+            else:
+                has_right = False
+        else:
+            self._right_confidence = 0.0
 
         # 3. Compute center path (from already-smoothed boundaries, no extra smoothing)
         if has_left and has_right:
@@ -141,16 +173,18 @@ class SegmentationLaneParser:
         """
         Extract left and right lane boundary points from mask via row scanning.
 
-        Uses contiguous pixel clustering instead of a fixed center split.
-        This handles curves correctly where both lane markings may shift
-        to the same side of the image center.
+        Uses contiguous pixel clustering and picks the best adjacent pair of
+        clusters whose midpoint is closest to the reference center. This correctly
+        handles cases where both lane boundaries are on the same side of the
+        image center (e.g., vehicle offset within the lane).
 
         For each row in the ROI:
         - Find all lane pixel indices
         - Group into contiguous clusters (separated by gaps)
-        - 2+ clusters: leftmost cluster's inner edge = left boundary,
-                       rightmost cluster's inner edge = right boundary
-        - 1 cluster: classify as left or right using previous frame's center
+        - 2+ clusters: pick the adjacent pair whose midpoint is closest
+          to the reference, left cluster inner edge = left boundary,
+          right cluster inner edge = right boundary
+        - 1 cluster: classify as left or right using reference
 
         Returns:
             Tuple of (left_points, right_points) as Nx2 arrays of [y, x]
@@ -172,14 +206,30 @@ class SegmentationLaneParser:
             split_indices = np.where(gaps > min_gap)[0]
 
             if len(split_indices) >= 1:
-                # 2+ clusters: use leftmost and rightmost
-                # Left boundary: inner (rightmost) edge of leftmost cluster
-                first_end = split_indices[0]
-                left_points.append([y, int(lane_pixels[first_end])])
+                # 2+ clusters: build list of (left_edge, right_edge) per cluster
+                clusters = []
+                start = 0
+                for si in split_indices:
+                    end = si
+                    clusters.append((int(lane_pixels[start]), int(lane_pixels[end])))
+                    start = si + 1
+                clusters.append((int(lane_pixels[start]), int(lane_pixels[-1])))
 
-                # Right boundary: inner (leftmost) edge of rightmost cluster
-                last_start = split_indices[-1] + 1
-                right_points.append([y, int(lane_pixels[last_start])])
+                ref_x = self._get_split_reference(y)
+
+                # Pick the best adjacent pair: midpoint closest to reference
+                best_pair = None  # (left_inner_edge, right_inner_edge, distance)
+                for i in range(len(clusters) - 1):
+                    left_inner = clusters[i][1]      # right edge of left cluster
+                    right_inner = clusters[i + 1][0]  # left edge of right cluster
+                    midpoint = (left_inner + right_inner) / 2.0
+                    dist = abs(midpoint - ref_x)
+                    if best_pair is None or dist < best_pair[2]:
+                        best_pair = (left_inner, right_inner, dist)
+
+                if best_pair is not None:
+                    left_points.append([y, best_pair[0]])
+                    right_points.append([y, best_pair[1]])
             else:
                 # Single cluster: classify using previous frame's center path
                 cluster_center = (lane_pixels[0] + lane_pixels[-1]) / 2.0
@@ -236,6 +286,34 @@ class SegmentationLaneParser:
         alpha = self.smoothing_factor
         return alpha * previous + (1 - alpha) * current
 
+    def _compute_fit_confidence(self, points: np.ndarray, poly: np.ndarray) -> float:
+        """
+        Compute confidence score for a lane boundary polynomial fit.
+
+        Combines two signals:
+        - Fit quality: RMSE of polynomial fit (lower = better).
+          Real lane markings follow a smooth curve; track edges scatter.
+        - Coverage: fraction of ROI rows with boundary points.
+          Real lanes are detected consistently; noise is intermittent.
+
+        Returns:
+            Confidence in [0, 1]. Higher = more likely a real lane.
+        """
+        y_vals = points[:, 0]
+        x_vals = points[:, 1]
+
+        # RMSE of polynomial fit (not R², which fails for straight lanes)
+        x_pred = np.polyval(poly, y_vals)
+        rmse = float(np.sqrt(np.mean((x_vals - x_pred) ** 2)))
+        max_rmse = 25.0  # pixels — above this, fit quality drops to 0
+        fit_quality = max(0.0, 1.0 - rmse / max_rmse)
+
+        # Coverage: what fraction of scannable ROI rows have points
+        total_rows = max(1, (self.image_height - 1 - self.roi_top) // self.row_step)
+        coverage = min(1.0, len(points) / total_rows)
+
+        return float(fit_quality * coverage)
+
     def _estimate_half_lane_width(self) -> float:
         """
         Estimate half lane width in pixels when only one boundary is visible.
@@ -286,8 +364,11 @@ class SegmentationLaneParser:
             # Fallback: normalize by half image width
             lateral_offset_normalized = lateral_offset_pixels / (self.image_width / 2.0)
 
-        # Heading angle from polynomial first derivative
-        heading_angle_deg = self._compute_heading_angle(y_vehicle)
+        # Heading angle from polynomial derivative — evaluate slightly above
+        # the vehicle (15% up) where the polynomial is more stable.
+        # At the very bottom edge, the quadratic tangent can be wildly exaggerated.
+        y_heading = float(self.image_height * 0.85)
+        heading_angle_deg = self._compute_heading_angle(y_heading)
 
         # Departure status
         departure_status = self._get_departure_status(
@@ -315,10 +396,10 @@ class SegmentationLaneParser:
         The polynomial gives x = f(y). The derivative dx/dy is the lateral
         slope of the road at position y. The heading angle is arctan(slope).
 
-        Convention (matches existing PD/PID controllers):
+        Convention (matches CV LaneAnalyzer):
             0 deg  = road goes straight ahead
-            +N deg = road curves right (vehicle heading left of road)
-            -N deg = road curves left (vehicle heading right of road)
+            +N deg = road/lane tilts right in image (dx/dy > 0 going down)
+            -N deg = road/lane tilts left in image (dx/dy < 0 going down)
         """
         if self._center_poly is None:
             return None
@@ -396,6 +477,10 @@ class SegmentationLaneParser:
             return None
         return float(np.polyval(self._center_poly, y))
 
+    def get_confidences(self) -> tuple[float, float]:
+        """Get current boundary confidence scores (left, right)."""
+        return (self._left_confidence, self._right_confidence)
+
     def reset(self):
         """Reset temporal smoothing state."""
         self._left_poly = None
@@ -404,4 +489,6 @@ class SegmentationLaneParser:
         self._prev_left_poly = None
         self._prev_right_poly = None
         self._prev_center_poly = None
+        self._left_confidence = 0.0
+        self._right_confidence = 0.0
         self._frame_count = 0

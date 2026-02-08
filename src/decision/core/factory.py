@@ -231,6 +231,7 @@ class ControllerFactory:
                     "heading_gain": kwargs.get("heading_gain", kwargs.get("kd", getattr(cfg, 'heading_gain', 0.15))),
                     "image_width": kwargs.get("image_width", getattr(cfg, 'image_width', 1280)),
                     "image_height": kwargs.get("image_height", getattr(cfg, 'image_height', 720)),
+                    "camera_offset_x": kwargs.get("camera_offset_x", 0),
                 }
             else:
                 params = {
@@ -239,6 +240,7 @@ class ControllerFactory:
                     "heading_gain": kwargs.get("heading_gain", kwargs.get("kd", 0.15)),
                     "image_width": kwargs.get("image_width", 1280),
                     "image_height": kwargs.get("image_height", 720),
+                    "camera_offset_x": kwargs.get("camera_offset_x", 0),
                 }
         else:
             params = {
@@ -247,6 +249,7 @@ class ControllerFactory:
                 "heading_gain": kwargs.get("heading_gain", kwargs.get("kd", 0.15)),
                 "image_width": kwargs.get("image_width", 1280),
                 "image_height": kwargs.get("image_height", 720),
+                "camera_offset_x": kwargs.get("camera_offset_x", 0),
             }
 
         return PurePursuitController(**params)

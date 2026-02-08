@@ -203,31 +203,34 @@ class SharedMemoryImageChannel:
     """
     High-performance shared memory channel for camera images.
 
+    Supports dynamic image resolutions up to 1920x1080. Actual dimensions
+    are communicated per-frame via the header, so writer and reader do not
+    need to agree on resolution at init time.
+
     Memory Layout:
-        [Header: 32 bytes][Image Data: width*height*channels bytes]
+        [Header: 32 bytes][Image Data: up to MAX_IMAGE_BYTES]
     """
 
-    def __init__(self, name: str, shape: tuple, create: bool = True, retry_count: int = 10, retry_delay: float = 0.5):
+    # Maximum image buffer: supports up to 1920x1080x3 (~6.2 MB)
+    MAX_IMAGE_BYTES = 1920 * 1080 * 3
+
+    def __init__(self, name: str, create: bool = True, retry_count: int = 10, retry_delay: float = 0.5):
         """
         Initialize shared memory image channel.
 
         Args:
             name: Unique name for shared memory
-            shape: Image shape (height, width, channels)
             create: True to create (writer), False to connect (reader)
             retry_count: Number of retry attempts for connection (default: 10)
             retry_delay: Delay between retries in seconds (default: 0.5)
         """
         self.name = name
-        self.shape = shape
-        self.height, self.width, self.channels = shape
         self._is_creator = create  # Track if we created this memory
         self._unregistered = False  # Track if we've unregistered from resource tracker
 
         # Calculate sizes
         self.header_size = SharedImageHeader.byte_size()
-        self.image_size = int(np.prod(shape))
-        self.total_size = self.header_size + self.image_size
+        self.total_size = self.header_size + self.MAX_IMAGE_BYTES
 
         # Create or connect to shared memory with retry logic
         if create:
@@ -252,15 +255,9 @@ class SharedMemoryImageChannel:
             for attempt in range(retry_count):
                 try:
                     self.shm = shared_memory.SharedMemory(name=name)
-                    # print(f"\n✓ Connected to image shared memory: {name}")
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
-                        # print(
-                        #     f"  Waiting for shared memory '{name}' "
-                        #     f"(attempt {attempt + 1}/{retry_count})...",
-                        #     end="\r", flush=True
-                        # )
                         time.sleep(retry_delay)
                     else:
                         raise ConnectionError(
@@ -270,11 +267,11 @@ class SharedMemoryImageChannel:
 
         # Create views
         self.header_view = self.shm.buf[:self.header_size]
-        self.image_view = np.ndarray(
-            shape,
-            dtype=np.uint8,
-            buffer=self.shm.buf[self.header_size:]
-        )
+        self.image_buf = self.shm.buf[self.header_size:]
+
+        # Cached ndarray views (recreated only when image shape changes)
+        self._cached_shape = None
+        self._cached_view = None
 
         # Synchronization
         self.lock = Lock()
@@ -282,9 +279,10 @@ class SharedMemoryImageChannel:
     def __del__(self):
         """Destructor - automatically cleanup when object is destroyed."""
         try:
-            # Release array views first
-            if hasattr(self, 'image_view'):
-                del self.image_view
+            if hasattr(self, '_cached_view'):
+                del self._cached_view
+            if hasattr(self, 'image_buf'):
+                del self.image_buf
             if hasattr(self, 'header_view'):
                 del self.header_view
         except Exception:
@@ -307,36 +305,53 @@ class SharedMemoryImageChannel:
                 except (KeyError, ValueError, AttributeError):
                     pass
 
+    def _get_view(self, shape):
+        """Get or create a cached ndarray view for the given shape."""
+        if self._cached_shape != shape:
+            self._cached_view = np.ndarray(
+                shape, dtype=np.uint8, buffer=self.shm.buf[self.header_size:]
+            )
+            self._cached_shape = shape
+        return self._cached_view
+
     def write(self, image: np.ndarray, timestamp: float, frame_id: int):
         """
-        Write image to shared memory.
+        Write image to shared memory. Accepts any image that fits in the buffer.
 
         Args:
-            image: Image array (must match shape)
+            image: Image array (any resolution up to max buffer size)
             timestamp: Image timestamp
             frame_id: Frame sequence number
         """
-        if image.shape != self.shape:
-            raise ValueError(f"Image shape {image.shape} != expected {self.shape}")
+        nbytes = image.nbytes
+        if nbytes > self.MAX_IMAGE_BYTES:
+            raise ValueError(
+                f"Image too large: {image.shape} = {nbytes} bytes "
+                f"(max {self.MAX_IMAGE_BYTES} bytes)"
+            )
+
+        h, w = image.shape[0], image.shape[1]
+        c = image.shape[2] if image.ndim == 3 else 1
 
         with self.lock:
-            # Write image data (fast memcpy)
-            np.copyto(self.image_view, image)
+            # Write image data using cached view for fast memcpy
+            view = self._get_view(image.shape)
+            np.copyto(view, image)
 
-            # Write header
+            # Write header with actual dimensions
             header = SharedImageHeader(
                 frame_id=frame_id,
                 timestamp=timestamp,
-                width=self.width,
-                height=self.height,
-                channels=self.channels,
+                width=w,
+                height=h,
+                channels=c,
                 ready=1
             )
             self.header_view[:] = header.pack()
 
     def read(self, copy: bool = True) -> Optional[ImageMessage]:
         """
-        Read image from shared memory.
+        Read image from shared memory. Reconstructs shape from header.
 
         Args:
             copy: If True, returns copy. If False, returns view (faster but unsafe)
@@ -352,15 +367,13 @@ class SharedMemoryImageChannel:
             if header.ready == 0:
                 return None
 
-            # Read image
-            if copy:
-                image = np.copy(self.image_view)
-            else:
-                image = self.image_view
+            shape = (header.height, header.width, header.channels)
+            view = self._get_view(shape)
 
-            # Mark as consumed (optional - comment out for multiple readers)
-            # header.ready = 0
-            # self.header_view[:] = header.pack()
+            if copy:
+                image = np.copy(view)
+            else:
+                image = view
 
             return ImageMessage(
                 image=image,
@@ -390,9 +403,10 @@ class SharedMemoryImageChannel:
     def close(self):
         """Close shared memory and unregister from resource tracker."""
         try:
-            # Release array views first
-            if hasattr(self, 'image_view'):
-                del self.image_view
+            if hasattr(self, '_cached_view'):
+                del self._cached_view
+            if hasattr(self, 'image_buf'):
+                del self.image_buf
             if hasattr(self, 'header_view'):
                 del self.header_view
         except Exception:
@@ -585,7 +599,7 @@ class SharedMemoryDetectionChannel:
                     # Debug: Log mask stats before writing (once)
                     if not hasattr(self, '_write_mask_debug_logged'):
                         nonzero = np.count_nonzero(mask)
-                        print(f"[SHM Write Debug] Mask: shape={mask.shape}, nonzero={nonzero}, max={mask.max()}")
+                        # print(f"[SHM Write Debug] Mask: shape={mask.shape}, nonzero={nonzero}, max={mask.max()}")
                         self._write_mask_debug_logged = True
                     # Write mask data as flat bytes
                     self.mask_view[:mask_size] = mask.flatten().tobytes()
@@ -674,7 +688,7 @@ class SharedMemoryDetectionChannel:
                         # Debug: Log mask stats after reading (once)
                         if not hasattr(self, '_read_mask_debug_logged'):
                             nonzero = np.count_nonzero(segmentation_mask)
-                            print(f"[SHM Read Debug] Mask: shape={segmentation_mask.shape}, nonzero={nonzero}, max={segmentation_mask.max()}")
+                            # print(f"[SHM Read Debug] Mask: shape={segmentation_mask.shape}, nonzero={nonzero}, max={segmentation_mask.max()}")
                             self._read_mask_debug_logged = True
                     except (ValueError, TypeError):
                         # Corrupted mask data - ignore

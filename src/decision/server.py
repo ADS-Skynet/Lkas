@@ -60,6 +60,7 @@ class DecisionServer:
                 "steer_threshold": config.throttle_policy.steer_threshold,
                 "steer_max": config.throttle_policy.steer_max,
             },
+            camera_offset_x=config.camera.offset_x,
         )
         # Set lookahead_ratio if Pure Pursuit controller
         if config.controller.method.lower() == "pure_pursuit" and hasattr(self.controller.controller, 'lookahead_ratio'):

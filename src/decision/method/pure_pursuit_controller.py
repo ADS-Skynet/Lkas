@@ -50,23 +50,27 @@ class PurePursuitController(SteeringController):
         heading_gain: float = 0.15,
         image_width: int = 1280,
         image_height: int = 720,
+        camera_offset_x: int = 0,
     ):
         """
         Args:
             gain: Main steering gain (scales lateral error at lookahead)
             lookahead_ratio: Fraction of image height for lookahead distance [0.2-0.7]
-                - Lower (0.2-0.3): more responsive, tighter tracking, can oscillate
-                - Higher (0.5-0.7): smoother steering, may cut corners on sharp turns
-                - Default 0.4: balanced for typical road driving
+                - Lower (0.2-0.3): looks closer, reacts to nearby road, tighter tracking
+                - Higher (0.5-0.7): looks further, anticipates curves early, smoother
+                - Default 0.5: balanced for typical road driving
             heading_gain: Gain for heading angle correction (damping term)
             image_width: Camera image width in pixels
             image_height: Camera image height in pixels
+            camera_offset_x: Pixel offset of camera center from vehicle center
+                             (negative = shift reference left)
         """
         self.gain = gain
         self.lookahead_ratio = lookahead_ratio
         self.heading_gain = heading_gain
         self.image_width = image_width
         self.image_height = image_height
+        self.camera_offset_x = camera_offset_x
 
         # Center path polynomial (set by DecisionController before each compute)
         self._center_poly = None
@@ -114,8 +118,11 @@ class PurePursuitController(SteeringController):
         the lateral error there. This is the key difference from
         standard PD control: we steer toward where the road WILL BE,
         not where it currently IS.
+
+        Heading is computed from the polynomial tangent at the lookahead
+        point (not at the vehicle position) to avoid unreliable edge slopes.
         """
-        vehicle_cx = self.image_width / 2.0
+        vehicle_cx = self.image_width / 2.0 + self.camera_offset_x
 
         # Lookahead y-position (higher up in image = further ahead on road)
         y_la = self.image_height * (1.0 - self.lookahead_ratio)
@@ -131,15 +138,24 @@ class PurePursuitController(SteeringController):
         error_normalized = lateral_error / (self.image_width / 2.0)
         error_normalized = float(np.clip(error_normalized, -1.0, 1.0))
 
-        # Heading correction (damping term from polynomial derivative)
-        heading_term = 0.0
-        if metrics.heading_angle_deg is not None:
-            heading_term = metrics.heading_angle_deg / 30.0
-            heading_term = float(np.clip(heading_term, -1.0, 1.0))
+        # Heading from polynomial tangent AT the lookahead point
+        # Using the derivative at the lookahead avoids wild tangent slopes
+        # at the bottom edge of the image where the polynomial extrapolates.
+        # dx/dy < 0 at lookahead means road goes right ahead → need to steer right
+        # This matches the CV convention: negative heading → steer right
+        deriv_poly = np.polyder(self._center_poly)
+        slope_at_la = float(np.polyval(deriv_poly, y_la))
+        heading_deg = float(np.degrees(np.arctan(slope_at_la)))
+        heading_term = heading_deg / 30.0
+        heading_term = float(np.clip(heading_term, -1.0, 1.0))
 
         # Pure pursuit control law
         # Negative sign: offset right -> steer left, offset left -> steer right
-        # Divide by lookahead_ratio: shorter lookahead = more aggressive
+        # gain and lookahead_ratio are independent:
+        #   - gain controls how aggressively to steer toward the path
+        #   - lookahead_ratio controls how far ahead to evaluate the error
+        # No division by lookahead_ratio — in image space the lateral error
+        # already scales naturally with lookahead distance on curves.
         steering = -(
             self.gain * error_normalized / self.lookahead_ratio
             + self.heading_gain * heading_term
@@ -188,6 +204,7 @@ class PurePursuitController(SteeringController):
 
     @kp.setter
     def kp(self, value):
+        print("setting kp:", value)
         self.gain = value
 
     @property
@@ -201,6 +218,7 @@ class PurePursuitController(SteeringController):
 
     def set_gains(self, *args):
         """Update controller gains (kp/gain, kd/heading_gain)."""
+        print("setting gains:", args)
         if len(args) >= 1:
             self.gain = float(args[0])
         if len(args) >= 2:
@@ -229,6 +247,9 @@ class PurePursuitController(SteeringController):
             return True
         elif name in ("heading_gain", "kd"):
             self.heading_gain = float(value)
+            return True
+        elif name == "camera_offset_x":
+            self.camera_offset_x = int(value)
             return True
         return False
 

@@ -38,6 +38,7 @@ class DecisionController:
         controller_method: str = "pid",
         throttle_policy: dict | None = None,
         config=None,
+        camera_offset_x: int = 0,
     ):
         """
         Initialize decision controller.
@@ -55,7 +56,10 @@ class DecisionController:
                 - steer_threshold: Steering magnitude to start reducing throttle (default: 0.15)
                 - steer_max: Maximum steering for throttle calculation (default: 0.70)
             config: Optional system configuration object
+            camera_offset_x: Pixel offset of camera center from vehicle center
         """
+        self.camera_offset_x = camera_offset_x
+
         # Lane analysis (CV detection path)
         self.analyzer = LaneAnalyzer(image_width=image_width, image_height=image_height)
 
@@ -63,6 +67,7 @@ class DecisionController:
         self.seg_parser = SegmentationLaneParser(
             image_width=image_width,
             image_height=image_height,
+            camera_offset_x=camera_offset_x,
         )
 
         # Steering control - use factory pattern for instantiation
@@ -76,6 +81,7 @@ class DecisionController:
         elif self.controller_method == "pure_pursuit":
             controller_params["image_width"] = image_width
             controller_params["image_height"] = image_height
+            controller_params["camera_offset_x"] = camera_offset_x
 
         self.controller: SteeringController = factory.create(
             controller_type=self.controller_method,
@@ -303,6 +309,8 @@ class DecisionController:
             'ki': (0.0, 0.5),              # Integral gain (PID only)
             'kd': (0.0, 1.0),              # Derivative gain
             'lookahead_ratio': (0.1, 0.8), # Pure Pursuit lookahead (fraction of image height)
+            'camera_offset_x': (-200, 200),# Camera center offset (pixels)
+            'min_confidence': (0.0, 1.0),  # Lane boundary confidence threshold
             'throttle_base': (0.0, 1.0),   # Base throttle
             'throttle_min': (0.0, 1.0),    # Minimum throttle
             'steer_threshold': (0.0, 1.0), # Steering threshold
@@ -337,6 +345,15 @@ class DecisionController:
             else:
                 print(f"⚠ Parameter 'lookahead_ratio' is only valid for Pure Pursuit controller")
                 return False
+        elif param_name == 'camera_offset_x':
+            offset = int(value)
+            self.camera_offset_x = offset
+            self.seg_parser.camera_offset_x = offset
+            self.seg_parser.vehicle_center_x = self.seg_parser.image_width // 2 + offset
+            if hasattr(self.controller, 'camera_offset_x'):
+                self.controller.camera_offset_x = offset
+        elif param_name == 'min_confidence':
+            self.seg_parser.min_confidence = float(value)
         elif param_name == 'throttle_base':
             self.throttle_policy['base'] = float(value)
         elif param_name == 'throttle_min':

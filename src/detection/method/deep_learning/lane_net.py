@@ -171,10 +171,10 @@ class DLLaneDetector(LaneDetector):
 
         # Debug: Log model output stats once
         if not hasattr(self, '_model_output_debug_logged'):
-            print(f"[DL Debug] logits shape={logits.shape}, dtype={logits.dtype}, min={logits.min().item():.4f}, max={logits.max().item():.4f}")
+            # print(f"[DL Debug] logits shape={logits.shape}, dtype={logits.dtype}, min={logits.min().item():.4f}, max={logits.max().item():.4f}")
             # Check class probabilities
             probs = torch.softmax(logits, dim=1)
-            print(f"[DL Debug] probs: class0 max={probs[0,0].max().item():.4f}, class1 max={probs[0,1].max().item():.4f}")
+            # print(f"[DL Debug] probs: class0 max={probs[0,0].max().item():.4f}, class1 max={probs[0,1].max().item():.4f}")
             self._model_output_debug_logged = True
 
         # Get prediction mask
@@ -183,7 +183,7 @@ class DLLaneDetector(LaneDetector):
         # Debug: Log prediction mask stats once
         if not hasattr(self, '_pred_debug_logged'):
             nonzero = np.count_nonzero(pred)
-            print(f"[DL Debug] pred shape={pred.shape}, nonzero={nonzero}, unique={np.unique(pred)}")
+            # print(f"[DL Debug] pred shape={pred.shape}, nonzero={nonzero}, unique={np.unique(pred)}")
             self._pred_debug_logged = True
 
         # Resize mask back to original size

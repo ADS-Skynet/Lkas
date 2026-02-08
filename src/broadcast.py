@@ -116,7 +116,6 @@ class BroadcastManager:
             try:
                 self.image_channel = SharedMemoryImageChannel(
                     name=self.image_shm_name,
-                    shape=(self.system_config.camera.height, self.system_config.camera.width, 3),
                     create=False,  # Reader mode
                     retry_count=1,
                     retry_delay=0.0,
@@ -243,7 +242,7 @@ class BroadcastManager:
             # Debug: Log mask stats before encoding
             if not hasattr(self, '_broadcast_mask_debug_logged'):
                 nonzero = np.count_nonzero(mask)
-                self.terminal.print(f"[Broadcast Debug] Mask before encoding: shape={mask.shape}, nonzero={nonzero}, max={mask.max()}")
+                # self.terminal.print(f"[Broadcast Debug] Mask before encoding: shape={mask.shape}, nonzero={nonzero}, max={mask.max()}")
                 self._broadcast_mask_debug_logged = True
             # Compress mask as PNG for efficient transmission
             success, encoded = cv2.imencode('.png', mask)
