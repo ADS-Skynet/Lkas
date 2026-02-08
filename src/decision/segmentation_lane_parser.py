@@ -97,6 +97,12 @@ class SegmentationLaneParser:
         self._frame_count = 0
         self._warmup_frames = 10
 
+        # Staleness counter: reset _prev_center_poly after prolonged absence
+        # Prevents stale reference from causing misclassification after
+        # track discontinuities (crossroads, gaps in detection)
+        self._center_stale_frames = 0
+        self._max_center_stale = 30
+
     def parse(self, mask: np.ndarray) -> LaneMetrics:
         """
         Parse binary segmentation mask into lane metrics.
@@ -152,6 +158,34 @@ class SegmentationLaneParser:
         else:
             self._right_confidence = 0.0
 
+        # 2b. Single-boundary reclassification
+        # When only one boundary survives, verify its left/right classification
+        # using vehicle_center_x. The per-row classification uses _prev_center_poly
+        # which can be stale after track discontinuities, causing persistent
+        # misclassification (e.g., a right-side boundary stuck as "left").
+        if has_left and not has_right and self._left_poly is not None:
+            x_at_bottom = float(np.polyval(self._left_poly, self.image_height - 1))
+            if x_at_bottom >= self.vehicle_center_x:
+                # Boundary is right of vehicle → reclassify as right
+                self._right_poly = self._left_poly
+                self._left_poly = None
+                self._prev_right_poly = self._right_poly.copy()
+                has_left, has_right = False, True
+                self._left_confidence, self._right_confidence = (
+                    self._right_confidence, self._left_confidence
+                )
+        elif has_right and not has_left and self._right_poly is not None:
+            x_at_bottom = float(np.polyval(self._right_poly, self.image_height - 1))
+            if x_at_bottom < self.vehicle_center_x:
+                # Boundary is left of vehicle → reclassify as left
+                self._left_poly = self._right_poly
+                self._right_poly = None
+                self._prev_left_poly = self._left_poly.copy()
+                has_left, has_right = True, False
+                self._left_confidence, self._right_confidence = (
+                    self._right_confidence, self._left_confidence
+                )
+
         # 3. Compute center path (from already-smoothed boundaries, no extra smoothing)
         if has_left and has_right:
             self._center_poly = (self._left_poly + self._right_poly) / 2.0
@@ -165,6 +199,13 @@ class SegmentationLaneParser:
 
         if self._center_poly is not None:
             self._prev_center_poly = self._center_poly.copy()
+            self._center_stale_frames = 0
+        else:
+            self._center_stale_frames += 1
+            if self._center_stale_frames >= self._max_center_stale:
+                # Stale for too long — clear so _get_split_reference
+                # falls back to vehicle_center_x for fresh classification
+                self._prev_center_poly = None
 
         # 4. Compute metrics from fitted polynomials
         return self._compute_metrics(has_left, has_right)
@@ -492,3 +533,4 @@ class SegmentationLaneParser:
         self._left_confidence = 0.0
         self._right_confidence = 0.0
         self._frame_count = 0
+        self._center_stale_frames = 0

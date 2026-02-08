@@ -151,11 +151,6 @@ class PurePursuitController(SteeringController):
 
         # Pure pursuit control law
         # Negative sign: offset right -> steer left, offset left -> steer right
-        # gain and lookahead_ratio are independent:
-        #   - gain controls how aggressively to steer toward the path
-        #   - lookahead_ratio controls how far ahead to evaluate the error
-        # No division by lookahead_ratio — in image space the lateral error
-        # already scales naturally with lookahead distance on curves.
         steering = -(
             self.gain * error_normalized / self.lookahead_ratio
             + self.heading_gain * heading_term
