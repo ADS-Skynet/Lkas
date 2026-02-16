@@ -54,41 +54,49 @@ from .messages import ImageMessage, DetectionMessage, LaneMessage
 
 @dataclass
 class SharedImageHeader:
-    """Header for shared image buffer."""
+    """Header for shared image buffer (with optional depth)."""
     frame_id: int
     timestamp: float
     width: int
     height: int
     channels: int
     ready: int  # 1 if new data available, 0 if already consumed
+    has_depth: int = 0  # 1 if depth data is present after color data
+    depth_scale: float = 0.0  # meters per raw depth unit (e.g. 0.001 for RealSense)
+
+    # Format: q=int64, d=double, i=int32×5, d=double
+    _FORMAT = 'qdiiiiid'
 
     @staticmethod
     def byte_size():
         """Size in bytes: Calculate actual struct size with padding."""
-        return struct.calcsize('qdiiii')
+        return struct.calcsize(SharedImageHeader._FORMAT)
 
     def pack(self) -> bytes:
         """Pack header to bytes."""
-        # Format: q=int64 (frame_id), d=double (timestamp), i=int32 (4 fields: width, height, channels, ready)
-        return struct.pack('qdiiii',
+        return struct.pack(self._FORMAT,
                           self.frame_id,
                           self.timestamp,
                           self.width,
                           self.height,
                           self.channels,
-                          self.ready)
+                          self.ready,
+                          self.has_depth,
+                          self.depth_scale)
 
     @staticmethod
     def unpack(data: bytes) -> 'SharedImageHeader':
         """Unpack header from bytes."""
-        values = struct.unpack('qdiiii', data)
+        values = struct.unpack(SharedImageHeader._FORMAT, data)
         return SharedImageHeader(
             frame_id=values[0],
             timestamp=values[1],
             width=values[2],
             height=values[3],
             channels=values[4],
-            ready=values[5]
+            ready=values[5],
+            has_depth=values[6],
+            depth_scale=values[7]
         )
 
 
@@ -201,18 +209,21 @@ class SharedLane:
 
 class SharedMemoryImageChannel:
     """
-    High-performance shared memory channel for camera images.
+    High-performance shared memory channel for camera images with optional depth.
 
     Supports dynamic image resolutions up to 1920x1080. Actual dimensions
     are communicated per-frame via the header, so writer and reader do not
     need to agree on resolution at init time.
 
     Memory Layout:
-        [Header: 32 bytes][Image Data: up to MAX_IMAGE_BYTES]
+        [Header][Color Data: up to MAX_IMAGE_BYTES][Depth Data: up to MAX_DEPTH_BYTES]
     """
 
     # Maximum image buffer: supports up to 1920x1080x3 (~6.2 MB)
     MAX_IMAGE_BYTES = 1920 * 1080 * 3
+
+    # Maximum depth buffer: supports up to 1920x1080 uint16 (~4.1 MB)
+    MAX_DEPTH_BYTES = 1920 * 1080 * 2
 
     def __init__(self, name: str, create: bool = True, retry_count: int = 10, retry_delay: float = 0.5):
         """
@@ -230,7 +241,8 @@ class SharedMemoryImageChannel:
 
         # Calculate sizes
         self.header_size = SharedImageHeader.byte_size()
-        self.total_size = self.header_size + self.MAX_IMAGE_BYTES
+        self.depth_offset = self.header_size + self.MAX_IMAGE_BYTES
+        self.total_size = self.header_size + self.MAX_IMAGE_BYTES + self.MAX_DEPTH_BYTES
 
         # Create or connect to shared memory with retry logic
         if create:
@@ -267,11 +279,14 @@ class SharedMemoryImageChannel:
 
         # Create views
         self.header_view = self.shm.buf[:self.header_size]
-        self.image_buf = self.shm.buf[self.header_size:]
+        self.image_buf = self.shm.buf[self.header_size:self.depth_offset]
+        self.depth_buf = self.shm.buf[self.depth_offset:]
 
-        # Cached ndarray views (recreated only when image shape changes)
+        # Cached ndarray views (recreated only when shape changes)
         self._cached_shape = None
         self._cached_view = None
+        self._cached_depth_shape = None
+        self._cached_depth_view = None
 
         # Synchronization
         self.lock = Lock()
@@ -281,8 +296,12 @@ class SharedMemoryImageChannel:
         try:
             if hasattr(self, '_cached_view'):
                 del self._cached_view
+            if hasattr(self, '_cached_depth_view'):
+                del self._cached_depth_view
             if hasattr(self, 'image_buf'):
                 del self.image_buf
+            if hasattr(self, 'depth_buf'):
+                del self.depth_buf
             if hasattr(self, 'header_view'):
                 del self.header_view
         except Exception:
@@ -306,7 +325,7 @@ class SharedMemoryImageChannel:
                     pass
 
     def _get_view(self, shape):
-        """Get or create a cached ndarray view for the given shape."""
+        """Get or create a cached ndarray view for the given image shape."""
         if self._cached_shape != shape:
             self._cached_view = np.ndarray(
                 shape, dtype=np.uint8, buffer=self.shm.buf[self.header_size:]
@@ -314,14 +333,26 @@ class SharedMemoryImageChannel:
             self._cached_shape = shape
         return self._cached_view
 
-    def write(self, image: np.ndarray, timestamp: float, frame_id: int):
+    def _get_depth_view(self, shape):
+        """Get or create a cached ndarray view for the given depth shape."""
+        if self._cached_depth_shape != shape:
+            self._cached_depth_view = np.ndarray(
+                shape, dtype=np.uint16, buffer=self.shm.buf[self.depth_offset:]
+            )
+            self._cached_depth_shape = shape
+        return self._cached_depth_view
+
+    def write(self, image: np.ndarray, timestamp: float, frame_id: int,
+              depth_image: Optional[np.ndarray] = None, depth_scale: float = 0.0):
         """
-        Write image to shared memory. Accepts any image that fits in the buffer.
+        Write image (and optional depth) to shared memory.
 
         Args:
-            image: Image array (any resolution up to max buffer size)
+            image: Color image array (any resolution up to max buffer size)
             timestamp: Image timestamp
             frame_id: Frame sequence number
+            depth_image: Optional depth array (H, W) uint16, same dimensions as color
+            depth_scale: Depth scale factor (meters per raw unit)
         """
         nbytes = image.nbytes
         if nbytes > self.MAX_IMAGE_BYTES:
@@ -333,10 +364,25 @@ class SharedMemoryImageChannel:
         h, w = image.shape[0], image.shape[1]
         c = image.shape[2] if image.ndim == 3 else 1
 
+        has_depth = 0
+        if depth_image is not None:
+            depth_nbytes = depth_image.nbytes
+            if depth_nbytes > self.MAX_DEPTH_BYTES:
+                raise ValueError(
+                    f"Depth too large: {depth_image.shape} = {depth_nbytes} bytes "
+                    f"(max {self.MAX_DEPTH_BYTES} bytes)"
+                )
+            has_depth = 1
+
         with self.lock:
-            # Write image data using cached view for fast memcpy
+            # Write color data using cached view for fast memcpy
             view = self._get_view(image.shape)
             np.copyto(view, image)
+
+            # Write depth data if available
+            if has_depth:
+                depth_view = self._get_depth_view(depth_image.shape)
+                np.copyto(depth_view, depth_image)
 
             # Write header with actual dimensions
             header = SharedImageHeader(
@@ -345,13 +391,15 @@ class SharedMemoryImageChannel:
                 width=w,
                 height=h,
                 channels=c,
-                ready=1
+                ready=1,
+                has_depth=has_depth,
+                depth_scale=depth_scale
             )
             self.header_view[:] = header.pack()
 
     def read(self, copy: bool = True) -> Optional[ImageMessage]:
         """
-        Read image from shared memory. Reconstructs shape from header.
+        Read image (and optional depth) from shared memory. Reconstructs shape from header.
 
         Args:
             copy: If True, returns copy. If False, returns view (faster but unsafe)
@@ -375,10 +423,21 @@ class SharedMemoryImageChannel:
             else:
                 image = view
 
+            # Read depth if available
+            depth_image = None
+            depth_scale = 0.0
+            if header.has_depth and header.width > 0 and header.height > 0:
+                depth_shape = (header.height, header.width)
+                depth_view = self._get_depth_view(depth_shape)
+                depth_image = np.copy(depth_view) if copy else depth_view
+                depth_scale = header.depth_scale
+
             return ImageMessage(
                 image=image,
                 timestamp=header.timestamp,
-                frame_id=header.frame_id
+                frame_id=header.frame_id,
+                depth_image=depth_image,
+                depth_scale=depth_scale
             )
 
     def read_blocking(self, timeout: float = 1.0, copy: bool = True) -> Optional[ImageMessage]:
@@ -405,8 +464,12 @@ class SharedMemoryImageChannel:
         try:
             if hasattr(self, '_cached_view'):
                 del self._cached_view
+            if hasattr(self, '_cached_depth_view'):
+                del self._cached_depth_view
             if hasattr(self, 'image_buf'):
                 del self.image_buf
+            if hasattr(self, 'depth_buf'):
+                del self.depth_buf
             if hasattr(self, 'header_view'):
                 del self.header_view
         except Exception:
@@ -789,7 +852,7 @@ from dataclasses import dataclass
 from typing import Optional
 from multiprocessing import shared_memory, Lock, resource_tracker
 
-from .messages import ControlMessage, ControlMode
+from .messages import ControlMessage, ControlMode, ObstacleMessage, ObstacleAction
 
 
 # =============================================================================
@@ -1028,23 +1091,134 @@ def int_to_control_mode(value: int) -> ControlMode:
 
 
 # =============================================================================
+# Obstacle Action Mapping
+# =============================================================================
+
+_OBSTACLE_ACTION_TO_INT = {
+    ObstacleAction.NORMAL: 0,
+    ObstacleAction.AVOID_LEFT: 1,
+    ObstacleAction.AVOID_RIGHT: 2,
+    ObstacleAction.STOP: 3,
+    ObstacleAction.SLOW: 4,
+}
+
+_INT_TO_OBSTACLE_ACTION = {v: k for k, v in _OBSTACLE_ACTION_TO_INT.items()}
+
+
+# =============================================================================
+# Obstacle Data Structure
+# =============================================================================
+
+@dataclass
+class SharedObstacleData:
+    """
+    Obstacle avoidance data written by YOLO obstacle detection module.
+
+    Memory layout (72 bytes with alignment):
+    - active: 4 bytes (int32) — 1 if obstacle avoidance is intervening
+    - action: 4 bytes (int32) — ObstacleAction enum value
+    - distance: 8 bytes (double) — meters to nearest obstacle (-1 if none)
+    - steering: 8 bytes (double) — recommended steering [-1, 1]
+    - throttle: 8 bytes (double) — recommended throttle [0, 1]
+    - brake: 8 bytes (double) — recommended brake [0, 1]
+    - timestamp: 8 bytes (double) — when this data was written
+    - frame_id: 8 bytes (int64) — frame ID of the detection
+    """
+    active: int = 0
+    action: int = 0
+    distance: float = -1.0
+    steering: float = 0.0
+    throttle: float = 0.0
+    brake: float = 0.0
+    timestamp: float = 0.0
+    frame_id: int = 0
+
+    _FORMAT = 'iidddddq'
+
+    @staticmethod
+    def byte_size():
+        return struct.calcsize(SharedObstacleData._FORMAT)
+
+    def pack(self) -> bytes:
+        return struct.pack(
+            self._FORMAT,
+            self.active,
+            self.action,
+            self.distance,
+            self.steering,
+            self.throttle,
+            self.brake,
+            self.timestamp,
+            self.frame_id,
+        )
+
+    @staticmethod
+    def unpack(data: bytes) -> 'SharedObstacleData':
+        values = struct.unpack(SharedObstacleData._FORMAT, data)
+        return SharedObstacleData(
+            active=values[0],
+            action=values[1],
+            distance=values[2],
+            steering=values[3],
+            throttle=values[4],
+            brake=values[5],
+            timestamp=values[6],
+            frame_id=values[7],
+        )
+
+    def to_obstacle_message(self) -> ObstacleMessage:
+        """Convert to ObstacleMessage."""
+        return ObstacleMessage(
+            active=bool(self.active),
+            action=_INT_TO_OBSTACLE_ACTION.get(self.action, ObstacleAction.NORMAL),
+            distance=self.distance,
+            steering=self.steering,
+            throttle=self.throttle,
+            brake=self.brake,
+            timestamp=self.timestamp,
+            frame_id=self.frame_id,
+        )
+
+    @staticmethod
+    def from_obstacle_message(msg: ObstacleMessage) -> 'SharedObstacleData':
+        """Create from ObstacleMessage."""
+        return SharedObstacleData(
+            active=1 if msg.active else 0,
+            action=_OBSTACLE_ACTION_TO_INT.get(msg.action, 0),
+            distance=msg.distance,
+            steering=msg.steering,
+            throttle=msg.throttle,
+            brake=msg.brake,
+            timestamp=msg.timestamp,
+            frame_id=msg.frame_id,
+        )
+
+
+# =============================================================================
 # Shared Memory Control Channel
 # =============================================================================
 
 class SharedMemoryControlChannel:
     """
-    High-performance shared memory channel for control commands.
+    High-performance shared memory channel for control commands and obstacle data.
 
     Memory Layout:
-        [Header: 48 bytes][Control Data: 160 bytes] = 208 bytes total
+        [Header: 48 bytes][Control Data: 176 bytes][Obstacle Data: ~56 bytes]
+
+    The obstacle section is written by the YOLO obstacle detection module and
+    read by the decision server to integrate obstacle awareness into control.
 
     Usage:
         # Writer (Decision Process)
-        channel = SharedMemoryControlChannel(name="control_commands", create=True)
+        channel = SharedMemoryControlChannel(name="control", create=True)
         channel.write(control_message)
 
+        # Obstacle writer (YOLO Process)
+        channel = SharedMemoryControlChannel(name="control", create=False)
+        channel.write_obstacle(obstacle_data)
+
         # Reader (Vehicle Process)
-        channel = SharedMemoryControlChannel(name="control_commands", create=False)
+        channel = SharedMemoryControlChannel(name="control", create=False)
         control = channel.read()
     """
 
@@ -1071,7 +1245,9 @@ class SharedMemoryControlChannel:
         # Calculate sizes
         self.header_size = SharedControlHeader.byte_size()
         self.data_size = SharedControlData.byte_size()
-        self.total_size = self.header_size + self.data_size
+        self.obstacle_size = SharedObstacleData.byte_size()
+        self.obstacle_offset = self.header_size + self.data_size
+        self.total_size = self.header_size + self.data_size + self.obstacle_size
 
         # Create or connect to shared memory
         if create:
@@ -1115,7 +1291,8 @@ class SharedMemoryControlChannel:
 
         # Create views
         self.header_view = self.shm.buf[:self.header_size]
-        self.data_view = self.shm.buf[self.header_size:self.header_size + self.data_size]
+        self.data_view = self.shm.buf[self.header_size:self.obstacle_offset]
+        self.obstacle_view = self.shm.buf[self.obstacle_offset:self.obstacle_offset + self.obstacle_size]
 
         # Synchronization
         self.lock = Lock()
@@ -1128,6 +1305,8 @@ class SharedMemoryControlChannel:
                 del self.header_view
             if hasattr(self, 'data_view'):
                 del self.data_view
+            if hasattr(self, 'obstacle_view'):
+                del self.obstacle_view
         except Exception:
             pass
 
@@ -1223,6 +1402,38 @@ class SharedMemoryControlChannel:
             time.sleep(0.0001)  # 0.1ms sleep
         return None
 
+    # ----- Obstacle data methods (written by YOLO, read by Decision Server) -----
+
+    def write_obstacle(self, obstacle: 'ObstacleMessage'):
+        """
+        Write obstacle avoidance data to the obstacle section of control SHM.
+
+        This is called by the YOLO obstacle detection script. The decision server
+        reads this data via read_obstacle() and integrates it into control output.
+
+        Args:
+            obstacle: ObstacleMessage with avoidance state
+        """
+        with self.lock:
+            data = SharedObstacleData.from_obstacle_message(obstacle)
+            self.obstacle_view[:] = data.pack()
+
+    def read_obstacle(self) -> Optional['ObstacleMessage']:
+        """
+        Read obstacle avoidance data from the obstacle section of control SHM.
+
+        Returns:
+            ObstacleMessage or None if no obstacle data has been written (all zeros)
+        """
+        with self.lock:
+            data = SharedObstacleData.unpack(bytes(self.obstacle_view))
+
+        # If timestamp is 0, no obstacle data has ever been written
+        if data.timestamp == 0.0:
+            return None
+
+        return data.to_obstacle_message()
+
     def close(self):
         """Close shared memory and unregister from resource tracker."""
         try:
@@ -1231,6 +1442,8 @@ class SharedMemoryControlChannel:
                 del self.header_view
             if hasattr(self, 'data_view'):
                 del self.data_view
+            if hasattr(self, 'obstacle_view'):
+                del self.obstacle_view
         except Exception:
             pass
 

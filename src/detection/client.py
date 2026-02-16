@@ -81,14 +81,17 @@ class DetectionClient:
                 retry_delay=retry_delay
             )
 
-    def send_image(self, image: np.ndarray, timestamp: float, frame_id: int) -> None:
+    def send_image(self, image: np.ndarray, timestamp: float, frame_id: int,
+                   depth_image: np.ndarray = None, depth_scale: float = 0.0) -> None:
         """
-        Send image to detection server.
+        Send image (and optional depth) to detection server.
 
         Args:
             image: Image array to send
             timestamp: Image timestamp
             frame_id: Frame identifier
+            depth_image: Optional depth array (H, W) uint16
+            depth_scale: Depth scale factor (meters per raw unit)
 
         Raises:
             RuntimeError: If image channel was not initialized (image_shm_name not provided)
@@ -98,7 +101,8 @@ class DetectionClient:
                 "Cannot send image: client was not initialized with image_shm_name. "
                 "Provide image_shm_name during initialization."
             )
-        self._image_channel.write(image, timestamp=timestamp, frame_id=frame_id)
+        self._image_channel.write(image, timestamp=timestamp, frame_id=frame_id,
+                                  depth_image=depth_image, depth_scale=depth_scale)
 
     def get_detection(self, timeout: float = 1.0) -> Optional[DetectionMessage]:
         """

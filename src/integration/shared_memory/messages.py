@@ -20,18 +20,22 @@ from enum import Enum
 @dataclass
 class ImageMessage:
     """
-    Image data from CARLA camera to detection module.
+    Image data from camera to detection module.
 
     Attributes:
         image: RGB image array (H, W, 3)
         timestamp: Simulation timestamp
         frame_id: Frame sequence number
         camera_transform: Camera position/rotation (optional)
+        depth_image: Depth image array (H, W) uint16 (optional)
+        depth_scale: Depth scale factor (meters per raw unit)
     """
     image: np.ndarray
     timestamp: float
     frame_id: int
     camera_transform: dict | None = None
+    depth_image: np.ndarray | None = None
+    depth_scale: float = 0.0
 
     @property
     def height(self) -> int:
@@ -166,6 +170,43 @@ class DetectionMessage:
 # =============================================================================
 # DECISION → CARLA: Control Commands
 # =============================================================================
+
+class ObstacleAction(Enum):
+    """Obstacle avoidance action type."""
+    NORMAL = "normal"
+    AVOID_LEFT = "avoid_left"
+    AVOID_RIGHT = "avoid_right"
+    STOP = "stop"
+    SLOW = "slow"
+
+
+@dataclass
+class ObstacleMessage:
+    """
+    Obstacle avoidance status from YOLO obstacle detection module.
+
+    Written by the YOLO obstacle avoidance script, read by the decision server
+    to integrate obstacle awareness into lane keeping control.
+
+    Attributes:
+        active: Whether obstacle avoidance is currently intervening
+        action: Avoidance action being taken
+        distance: Distance to nearest obstacle in meters (-1 if none)
+        steering: Recommended steering override [-1, 1]
+        throttle: Recommended throttle [0, 1]
+        brake: Recommended brake [0, 1]
+        timestamp: When obstacle data was last written
+        frame_id: Frame ID when obstacle was detected
+    """
+    active: bool = False
+    action: ObstacleAction = ObstacleAction.NORMAL
+    distance: float = -1.0
+    steering: float = 0.0
+    throttle: float = 0.0
+    brake: float = 0.0
+    timestamp: float = 0.0
+    frame_id: int = 0
+
 
 class ControlMode(Enum):
     """Control mode for the vehicle."""

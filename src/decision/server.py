@@ -10,6 +10,7 @@ import time
 
 from lkas.decision.controller import DecisionController
 from lkas.integration.shared_memory import SharedMemoryDetectionChannel, SharedMemoryControlChannel
+from lkas.integration.shared_memory.messages import ObstacleAction
 
 
 class DecisionServer:
@@ -122,6 +123,39 @@ class DecisionServer:
         """
         self.controller.update_parameter(param_name, value)
 
+    def _apply_obstacle_override(self, control, obstacle):
+        """
+        Apply obstacle avoidance override to control commands.
+
+        The YOLO obstacle detection module writes obstacle status to the control
+        shared memory. This method reads that status and adjusts the control
+        output accordingly.
+
+        Args:
+            control: ControlMessage from lane keeping
+            obstacle: ObstacleMessage from YOLO obstacle detection
+
+        Returns:
+            Modified ControlMessage with obstacle avoidance applied
+        """
+        action = obstacle.action
+
+        if action == ObstacleAction.STOP:
+            control.steering = 0.0
+            control.throttle = 0.0
+            control.brake = 1.0
+        elif action in (ObstacleAction.AVOID_LEFT, ObstacleAction.AVOID_RIGHT):
+            control.steering = obstacle.steering
+            control.throttle = obstacle.throttle
+            control.brake = obstacle.brake
+        elif action == ObstacleAction.SLOW:
+            # Reduce throttle but keep LKAS steering
+            control.throttle = min(control.throttle, obstacle.throttle)
+        # NORMAL: no override, use LKAS control as-is
+
+        control.clamp_values()
+        return control
+
     def run(self, print_stats: bool = True):
         """Start serving decision requests.
 
@@ -161,6 +195,12 @@ class DecisionServer:
                     # Process detection and compute control
                     start_time = time.time()
                     control = self.controller.process_detection(detection)
+
+                    # Read obstacle data from YOLO (if available) and apply override
+                    obstacle = self.control_channel.read_obstacle()
+                    if obstacle is not None and obstacle.active:
+                        control = self._apply_obstacle_override(control, obstacle)
+
                     processing_time_ms = (time.time() - start_time) * 1000.0
 
                     # Write control to shared memory using proper control channel

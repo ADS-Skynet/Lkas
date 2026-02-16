@@ -83,16 +83,20 @@ class LKASClient:
             retry_delay=retry_delay
         )
 
-    def send_image(self, image: np.ndarray, timestamp: float, frame_id: int) -> None:
+    def send_image(self, image: np.ndarray, timestamp: float, frame_id: int,
+                   depth_image: np.ndarray = None, depth_scale: float = 0.0) -> None:
         """
-        Send camera image to LKAS system.
+        Send camera image (and optional depth) to LKAS system.
 
         Args:
             image: Camera image array (height, width, channels)
             timestamp: Image capture timestamp
             frame_id: Sequential frame identifier
+            depth_image: Optional depth array (H, W) uint16
+            depth_scale: Depth scale factor (meters per raw unit)
         """
-        self._detection_client.send_image(image, timestamp, frame_id)
+        self._detection_client.send_image(image, timestamp, frame_id,
+                                          depth_image=depth_image, depth_scale=depth_scale)
 
     def get_detection(self, timeout: float = 1.0) -> DetectionMessage | None:
         """
