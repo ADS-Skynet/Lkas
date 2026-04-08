@@ -159,14 +159,26 @@ class SegmentationLaneParser:
             self._right_confidence = 0.0
 
         # 2b. Single-boundary reclassification
-        # When only one boundary survives, verify its left/right classification
-        # using vehicle_center_x. The per-row classification uses _prev_center_poly
-        # which can be stale after track discontinuities, causing persistent
-        # misclassification (e.g., a right-side boundary stuck as "left").
+        # When only one boundary survives, verify its left/right classification.
+        # The per-row classification uses _prev_center_poly which can be stale
+        # after track discontinuities, causing persistent misclassification
+        # (e.g., a right-side boundary stuck as "left").
+        #
+        # IMPORTANT: Use _prev_center_poly as the split reference, NOT
+        # vehicle_center_x. On curves, even the left lane line can appear
+        # right of vehicle_center_x, causing a false reclassification that
+        # puts the estimated center on the wrong side and produces full-lock
+        # steering in the wrong direction.
+        y_bottom = float(self.image_height - 1)
+        if self._prev_center_poly is not None:
+            reclass_ref = float(np.polyval(self._prev_center_poly, y_bottom))
+        else:
+            reclass_ref = float(self.vehicle_center_x)
+
         if has_left and not has_right and self._left_poly is not None:
-            x_at_bottom = float(np.polyval(self._left_poly, self.image_height - 1))
-            if x_at_bottom >= self.vehicle_center_x:
-                # Boundary is right of vehicle → reclassify as right
+            x_at_bottom = float(np.polyval(self._left_poly, y_bottom))
+            if x_at_bottom >= reclass_ref:
+                # Boundary is right of lane center → reclassify as right
                 self._right_poly = self._left_poly
                 self._left_poly = None
                 self._prev_right_poly = self._right_poly.copy()
@@ -175,9 +187,9 @@ class SegmentationLaneParser:
                     self._right_confidence, self._left_confidence
                 )
         elif has_right and not has_left and self._right_poly is not None:
-            x_at_bottom = float(np.polyval(self._right_poly, self.image_height - 1))
-            if x_at_bottom < self.vehicle_center_x:
-                # Boundary is left of vehicle → reclassify as left
+            x_at_bottom = float(np.polyval(self._right_poly, y_bottom))
+            if x_at_bottom < reclass_ref:
+                # Boundary is left of lane center → reclassify as left
                 self._left_poly = self._right_poly
                 self._right_poly = None
                 self._prev_left_poly = self._left_poly.copy()
@@ -187,6 +199,11 @@ class SegmentationLaneParser:
                 )
 
         # 3. Compute center path (from already-smoothed boundaries, no extra smoothing)
+        # Track whether this is a confirmed two-boundary center or a single-lane estimate.
+        # Single-lane estimates must NOT update _prev_center_poly: they are approximate
+        # and can poison future reclassification decisions (causing persistent wrong-side
+        # misclassification which leads to full-lock steering in the wrong direction).
+        both_lanes_confirmed = has_left and has_right
         if has_left and has_right:
             self._center_poly = (self._left_poly + self._right_poly) / 2.0
         elif has_left:
@@ -198,7 +215,10 @@ class SegmentationLaneParser:
             self._center_poly[-1] -= self._estimate_half_lane_width()
 
         if self._center_poly is not None:
-            self._prev_center_poly = self._center_poly.copy()
+            # Only update _prev_center_poly from confirmed two-boundary detections.
+            # Single-lane estimates are too uncertain to serve as future reference.
+            if both_lanes_confirmed:
+                self._prev_center_poly = self._center_poly.copy()
             self._center_stale_frames = 0
         else:
             self._center_stale_frames += 1

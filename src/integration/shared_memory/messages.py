@@ -254,7 +254,7 @@ class ControlMessage:
     def clamp_values(self):
         """Ensure all control values are within valid ranges."""
         self.steering = max(-1.0, min(1.0, self.steering))
-        self.throttle = max(0.0, min(1.0, self.throttle))
+        self.throttle = max(-1.0, min(1.0, self.throttle))
         self.brake = max(0.0, min(1.0, self.brake))
 
 

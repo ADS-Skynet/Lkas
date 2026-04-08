@@ -88,52 +88,20 @@ class DecisionController:
             **controller_params
         )
 
-        # Adaptive throttle policy
-        self.throttle_policy = throttle_policy or {
-            "base": 0.15,
-            "min": 0.05,
-            "steer_threshold": 0.15,
-            "steer_max": 0.70,
-        }
-
-        # Default throttle/brake (used when adaptive throttle is disabled)
-        self.default_throttle = 0.3
+        # Fixed throttle levels (simple 3-level system)
+        self.normal_throttle = (throttle_policy or {}).get("base", 0.4)
         self.default_brake = 0.0
-        self.use_adaptive_throttle = throttle_policy is not None
 
         # Control mode
         self.mode = ControlMode.LANE_KEEPING
 
-    def compute_adaptive_throttle(self, steering: float) -> float:
-        """
-        Compute adaptive throttle based on steering magnitude.
-
-        The throttle decreases as steering increases to prevent overshooting in turns.
-        This helps maintain stable control during sharp maneuvers.
-
-        Args:
-            steering: Steering value in range [-1, 1]
-
-        Returns:
-            Throttle value in range [throttle_min, throttle_base]
-        """
-        abs_steering = abs(steering)
-        policy = self.throttle_policy
-
-        # If steering is below threshold, use base throttle
-        if abs_steering <= policy["steer_threshold"]:
-            return policy["base"]
-
-        # Calculate linear interpolation factor between threshold and max
-        steer_range = policy["steer_max"] - policy["steer_threshold"]
-        steer_delta = abs_steering - policy["steer_threshold"]
-        t = max(0.0, min(1.0, steer_delta / max(1e-6, steer_range)))
-
-        # Interpolate between base and min throttle
-        throttle_range = policy["base"] - policy["min"]
-        throttle = policy["base"] - (throttle_range * t)
-
-        return max(policy["min"], min(policy["base"], throttle))
+        # Last known good steering + throttle.
+        # Held when lanes are not detected so the vehicle keeps moving
+        # rather than braking immediately on transient lane loss.
+        self._last_steering = 0.0
+        self._last_throttle = self.normal_throttle
+        self._hold_frames = 0         # consecutive frames with no detection
+        self._hold_max = 8            # max frames to hold before returning to 0
 
     def process_detection(self, detection: DetectionMessage) -> ControlMessage:
         """
@@ -183,19 +151,25 @@ class DecisionController:
         # Compute steering from metrics (works with any controller)
         steering = self.controller.compute_steering(metrics)
 
-        # If no steering computed (e.g., no lanes detected), use safe default
+        # If both lanes are not detected, hold last known values.
+        # steering is None only when zero lanes are detected (no lane pixels at all).
+        # When one lane is visible (curves, object blocking one side), the parser
+        # estimates a center poly so steering is still computed — let it through.
         if steering is None:
-            steering = 0.0
-            # Apply brake when no lanes detected
-            throttle = 0.0
-            brake = 0.3
-        else:
-            # Use adaptive throttle if enabled, otherwise use default
-            if self.use_adaptive_throttle:
-                throttle = self.compute_adaptive_throttle(steering)
+            self._hold_frames += 1
+            if self._hold_frames > self._hold_max:
+                steering = 0.0
+                throttle = self.normal_throttle
             else:
-                throttle = self.default_throttle
+                steering = self._last_steering
+                throttle = self._last_throttle
             brake = self.default_brake
+        else:
+            self._hold_frames = 0
+            throttle = self.normal_throttle
+            brake = self.default_brake
+            self._last_steering = steering
+            self._last_throttle = throttle
 
         # Collect polynomial coefficients and confidence for debug overlay
         left_poly = None
@@ -287,10 +261,13 @@ class DecisionController:
         Used when:
             - User presses reset button
             - Starting a new session
-            - After significant disturbance
+            - After significant disturbance (e.g. obstacle avoidance ends)
         """
         self.controller.reset_state()
         self.seg_parser.reset()
+        self._last_steering = 0.0
+        self._last_throttle = self.normal_throttle
+        self._hold_frames = 0
 
     def update_parameter(self, param_name: str, value: float) -> bool:
         """
@@ -316,10 +293,7 @@ class DecisionController:
             'lookahead_ratio': (0.1, 0.8), # Pure Pursuit lookahead (fraction of image height)
             'camera_offset_x': (-200, 200),# Camera center offset (pixels)
             'min_confidence': (0.0, 1.0),  # Lane boundary confidence threshold
-            'throttle_base': (0.0, 1.0),   # Base throttle
-            'throttle_min': (0.0, 1.0),    # Minimum throttle
-            'steer_threshold': (0.0, 1.0), # Steering threshold
-            'steer_max': (0.0, 1.0),       # Maximum steering
+            'throttle_base': (0.0, 1.0),   # Normal throttle
         }
 
         if param_name not in valid_params:
@@ -360,12 +334,7 @@ class DecisionController:
         elif param_name == 'min_confidence':
             self.seg_parser.min_confidence = float(value)
         elif param_name == 'throttle_base':
-            self.throttle_policy['base'] = float(value)
-        elif param_name == 'throttle_min':
-            self.throttle_policy['min'] = float(value)
-        elif param_name == 'steer_threshold':
-            self.throttle_policy['steer_threshold'] = float(value)
-        elif param_name == 'steer_max':
-            self.throttle_policy['steer_max'] = float(value)
+            self.normal_throttle = float(value)
+            self._last_throttle = self.normal_throttle
 
         return True

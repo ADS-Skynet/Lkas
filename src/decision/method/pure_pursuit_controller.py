@@ -70,7 +70,8 @@ class PurePursuitController(SteeringController):
         self.heading_gain = heading_gain
         self.image_width = image_width
         self.image_height = image_height
-        self.camera_offset_x = camera_offset_x
+        # self.camera_offset_x = camera_offset_x
+        self.camera_offset_x = -25
 
         # Center path polynomial (set by DecisionController before each compute)
         self._center_poly = None

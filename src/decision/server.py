@@ -99,6 +99,7 @@ class DecisionServer:
         self.running = False
         self.frame_count = 0
         self.last_print_time = time.time()
+        self._prev_obstacle_active = False  # tracks obstacle→inactive transition
 
         # Setup parameter updates if enabled
         self.param_sub = None
@@ -149,8 +150,10 @@ class DecisionServer:
             control.throttle = obstacle.throttle
             control.brake = obstacle.brake
         elif action == ObstacleAction.SLOW:
-            # Reduce throttle but keep LKAS steering
-            control.throttle = min(control.throttle, obstacle.throttle)
+            # Override throttle with obstacle-specified value, keep LKAS steering.
+            # This lets YOLO set an exact throttle (e.g. 0.3) when an obstacle
+            # is detected within range, regardless of what LKAS computed.
+            control.throttle = obstacle.throttle
         # NORMAL: no override, use LKAS control as-is
 
         control.clamp_values()
@@ -198,8 +201,16 @@ class DecisionServer:
 
                     # Read obstacle data from YOLO (if available) and apply override
                     obstacle = self.control_channel.read_obstacle()
-                    if obstacle is not None and obstacle.active:
+                    currently_active = obstacle is not None and obstacle.active
+                    if currently_active:
                         control = self._apply_obstacle_override(control, obstacle)
+                    elif self._prev_obstacle_active:
+                        # Avoidance just finished: reset PID integral and stale
+                        # seg_parser polynomials so LKAS starts fresh in the new
+                        # lane position rather than fighting accumulated error.
+                        self.controller.reset_state()
+                        print("\n[Decision] Avoidance ended — controller state reset")
+                    self._prev_obstacle_active = currently_active
 
                     processing_time_ms = (time.time() - start_time) * 1000.0
 
