@@ -4,7 +4,7 @@ Calculates vehicle position relative to lane and provides metrics for LKAS.
 """
 
 import numpy as np
-from typing import Tuple, Dict
+from typing import Tuple
 from enum import Enum
 
 from common.types.models import Lane, LaneMetrics, LaneDepartureStatus
@@ -299,64 +299,3 @@ class LaneAnalyzer:
             has_both_lanes=(left_lane is not None and right_lane is not None)
         )
 
-    def get_steering_correction(self,
-                                left_lane: Lane | Tuple[int, int, int, int] | None,
-                                right_lane: Lane | Tuple[int, int, int, int] | None,
-                                kp: float = 0.5,
-                                kd: float = 0.1) -> float | None:
-        """
-        Calculate suggested steering correction using PD controller.
-
-        Args:
-            left_lane: Left lane line
-            right_lane: Right lane line
-            kp: Proportional gain
-            kd: Derivative gain
-
-        Returns:
-            Steering correction value [-1, 1] or None
-            Negative = steer left, Positive = steer right
-        """
-        offset = self.calculate_lateral_offset(left_lane, right_lane)
-        heading = self.calculate_heading_angle(left_lane, right_lane)
-
-        if offset is None or heading is None:
-            return None
-
-        # Normalize offset to [-1, 1]
-        lane_width = self.calculate_lane_width(left_lane, right_lane)
-        if lane_width is None or lane_width == 0:
-            return None
-
-        normalized_offset = offset / (lane_width / 2.0)
-        normalized_offset = np.clip(normalized_offset, -1.0, 1.0)
-
-        # Normalize heading to [-1, 1] (assuming max ±30 degrees)
-        normalized_heading = heading / 30.0
-        normalized_heading = np.clip(normalized_heading, -1.0, 1.0)
-
-        # PD control
-        correction = -(kp * normalized_offset + kd * normalized_heading)
-        correction = np.clip(correction, -1.0, 1.0)
-
-        return correction
-
-
-if __name__ == "__main__":
-    # Example usage
-    analyzer = LaneAnalyzer(image_width=800, image_height=600)
-
-    # Example lane lines
-    left_lane = (200, 600, 350, 360)
-    right_lane = (600, 600, 450, 360)
-
-    # Get metrics
-    metrics = analyzer.get_metrics(left_lane, right_lane)
-
-    print("Lane Analysis Metrics:")
-    for key, value in metrics.items():
-        print(f"  {key}: {value}")
-
-    # Get steering correction
-    correction = analyzer.get_steering_correction(left_lane, right_lane)
-    print(f"\nSteering correction: {correction:.3f}")

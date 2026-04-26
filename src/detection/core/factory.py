@@ -14,7 +14,7 @@ class DetectorFactory:
 
     Usage:
         factory = DetectorFactory(config)
-        detector = factory.create('cv')
+        detector = factory.create('dl')
     """
 
     def __init__(self, config: Any):
@@ -31,7 +31,7 @@ class DetectorFactory:
         Create a lane detector instance.
 
         Args:
-            detector_type: Type of detector ('cv', 'dl', or None for config default)
+            detector_type: Type of detector ('dl', or None for config default)
             **kwargs: Additional parameters to override config
 
         Returns:
@@ -45,37 +45,12 @@ class DetectorFactory:
 
         detector_type = detector_type.lower()
 
-        if detector_type == "cv":
-            return self._create_cv_detector(**kwargs)
-        elif detector_type == "dl":
+        if detector_type == "dl":
             return self._create_dl_detector(**kwargs)
         else:
             raise ValueError(
-                f"Unknown detector type: {detector_type}. Use 'cv' or 'dl'."
+                f"Unknown detector type: {detector_type}. Use 'dl'."
             )
-
-    def _create_cv_detector(self, **kwargs) -> LaneDetector:
-        """Create Computer Vision detector."""
-        # Import here to avoid circular dependencies
-        from lkas.detection.method.computer_vision.cv_lane_detector import CVLaneDetector
-
-        cfg = self.config.cv_detector
-
-        params = {
-            "canny_low": kwargs.get("canny_low", cfg.canny_low),
-            "canny_high": kwargs.get("canny_high", cfg.canny_high),
-            "hough_threshold": kwargs.get("hough_threshold", cfg.hough_threshold),
-            "hough_min_line_len": kwargs.get(
-                "hough_min_line_len", cfg.hough_min_line_len
-            ),
-            "hough_max_line_gap": kwargs.get(
-                "hough_max_line_gap", cfg.hough_max_line_gap
-            ),
-            "smoothing_factor": kwargs.get("smoothing_factor", cfg.smoothing_factor),
-            "config": cfg,  # Pass the full config for ROI and other parameters
-        }
-
-        return CVLaneDetector(**params)
 
     def _create_dl_detector(self, **kwargs) -> LaneDetector:
         """Create Deep Learning detector (BiSeNet V2 with PyTorch)."""
@@ -104,4 +79,4 @@ class DetectorFactory:
         Returns:
             List of detector type strings
         """
-        return ["cv", "dl"]
+        return ["dl"]
