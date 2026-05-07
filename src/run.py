@@ -31,7 +31,7 @@ def main():
     parser.add_argument(
         "--method",
         type=str,
-        default="cv",
+        default="dl",
         choices=["cv", "dl"],
         help="Lane detection method (cv=Computer Vision, dl=Deep Learning)",
     )

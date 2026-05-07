@@ -64,6 +64,8 @@ class ControllerFactory:
             return self._create_pd_controller(**kwargs)
         elif controller_type == "pid":
             return self._create_pid_controller(**kwargs)
+        elif controller_type == "pure_pursuit":
+            return self._create_pure_pursuit_controller(**kwargs)
         elif controller_type == "mpc":
             return self._create_mpc_controller(**kwargs)
         elif controller_type == "pfc":
@@ -199,6 +201,59 @@ class ControllerFactory:
 
         return MPCController(**params)
 
+    def _create_pure_pursuit_controller(self, **kwargs) -> SteeringController:
+        """
+        Create Pure Pursuit path tracking controller.
+
+        Designed for DL segmentation-based lane detection. Uses a lookahead
+        point on the center path polynomial to compute steering.
+
+        Args:
+            **kwargs: Override default parameters
+                gain (or kp): Main steering gain (default: 0.8)
+                lookahead_ratio: Lookahead distance as fraction of image height (default: 0.4)
+                heading_gain (or kd): Heading angle correction gain (default: 0.15)
+                image_width: Camera image width (default: 1280)
+                image_height: Camera image height (default: 720)
+
+        Returns:
+            PurePursuitController instance
+        """
+        from lkas.decision.method.pure_pursuit_controller import PurePursuitController
+
+        # Get defaults from config if available
+        if self.config and hasattr(self.config, 'decision'):
+            cfg = getattr(self.config.decision, 'pure_pursuit', None)
+            if cfg:
+                params = {
+                    "gain": kwargs.get("gain", kwargs.get("kp", getattr(cfg, 'gain', 0.8))),
+                    "lookahead_ratio": kwargs.get("lookahead_ratio", getattr(cfg, 'lookahead_ratio', 0.4)),
+                    "heading_gain": kwargs.get("heading_gain", kwargs.get("kd", getattr(cfg, 'heading_gain', 0.15))),
+                    "image_width": kwargs.get("image_width", getattr(cfg, 'image_width', 1280)),
+                    "image_height": kwargs.get("image_height", getattr(cfg, 'image_height', 720)),
+                    "camera_offset_x": kwargs.get("camera_offset_x", 0),
+                }
+            else:
+                params = {
+                    "gain": kwargs.get("gain", kwargs.get("kp", 0.8)),
+                    "lookahead_ratio": kwargs.get("lookahead_ratio", 0.4),
+                    "heading_gain": kwargs.get("heading_gain", kwargs.get("kd", 0.15)),
+                    "image_width": kwargs.get("image_width", 1280),
+                    "image_height": kwargs.get("image_height", 720),
+                    "camera_offset_x": kwargs.get("camera_offset_x", 0),
+                }
+        else:
+            params = {
+                "gain": kwargs.get("gain", kwargs.get("kp", 0.8)),
+                "lookahead_ratio": kwargs.get("lookahead_ratio", 0.4),
+                "heading_gain": kwargs.get("heading_gain", kwargs.get("kd", 0.15)),
+                "image_width": kwargs.get("image_width", 1280),
+                "image_height": kwargs.get("image_height", 720),
+                "camera_offset_x": kwargs.get("camera_offset_x", 0),
+            }
+
+        return PurePursuitController(**params)
+
     def _create_pfc_controller(self, **kwargs) -> SteeringController:
         """
         Create PFC (Predictive Functional Control) controller.
@@ -226,4 +281,4 @@ class ControllerFactory:
         Returns:
             List of controller type strings
         """
-        return ["pd", "pid", "mpc"]  # Add "pfc" when implemented
+        return ["pd", "pid", "pure_pursuit", "mpc"]  # Add "pfc" when implemented

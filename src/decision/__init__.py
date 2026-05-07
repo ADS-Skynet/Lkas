@@ -34,11 +34,12 @@ Simple Usage:
 
 from .controller import DecisionController
 from .lane_analyzer import LaneAnalyzer
+from .segmentation_lane_parser import SegmentationLaneParser
 from .client import DecisionClient
 from .core import ControllerFactory, SteeringController
 
 # Expose method-level controllers for backward compatibility
-from .method import PDController, PIDController
+from .method import PDController, PIDController, PurePursuitController
 
 __all__ = [
     'DecisionController',
@@ -46,6 +47,8 @@ __all__ = [
     'SteeringController',
     'PDController',
     'PIDController',
+    'PurePursuitController',
     'LaneAnalyzer',
+    'SegmentationLaneParser',
     'DecisionClient',
 ]

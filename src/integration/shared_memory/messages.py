@@ -49,7 +49,7 @@ class ImageMessage:
 @dataclass
 class LaneMessage:
     """
-    Single lane line representation.
+    Single lane line representation (for CV detection - two endpoints).
 
     Attributes:
         x1, y1: Starting point (bottom of image)
@@ -71,17 +71,57 @@ class LaneMessage:
 
 
 @dataclass
+class LaneContour:
+    """
+    Lane contour representation (for DL detection - multiple points).
+
+    Attributes:
+        points: List of (x, y) points forming the lane contour
+        class_id: Lane class ID from segmentation (1-4 for multi-class)
+        confidence: Detection confidence [0, 1]
+    """
+    points: list  # List of [x, y] points
+    class_id: int = 1
+    confidence: float = 1.0
+
+    @property
+    def num_points(self) -> int:
+        """Number of points in the contour."""
+        return len(self.points)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'points': self.points,
+            'class_id': self.class_id,
+            'confidence': self.confidence
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'LaneContour':
+        """Create from dictionary."""
+        return cls(
+            points=data['points'],
+            class_id=data.get('class_id', 1),
+            confidence=data.get('confidence', 1.0)
+        )
+
+
+@dataclass
 class DetectionMessage:
     """
     Lane detection results from detection module to decision module.
 
     Attributes:
-        left_lane: Left lane line (if detected)
-        right_lane: Right lane line (if detected)
+        left_lane: Left lane line for CV detection (if detected)
+        right_lane: Right lane line for CV detection (if detected)
+        lanes: List of lane contours for DL detection (multiple lanes)
         processing_time_ms: Detection processing time
         debug_image: Visualization image (optional)
         frame_id: Corresponding frame ID
         timestamp: Detection timestamp
+        segmentation_mask: DL segmentation mask for visualization (optional, H x W, uint8)
+        detection_method: Detection method used ('cv' or 'dl')
     """
     left_lane: LaneMessage | None
     right_lane: LaneMessage | None
@@ -89,16 +129,38 @@ class DetectionMessage:
     frame_id: int
     timestamp: float
     debug_image: np.ndarray | None = None
+    segmentation_mask: np.ndarray | None = None  # For DL visualization
+    detection_method: str = "cv"  # 'cv' or 'dl'
+    lanes: list | None = None  # List of LaneContour for DL detection
 
     @property
     def has_both_lanes(self) -> bool:
-        """Check if both lanes were detected."""
+        """Check if both lanes were detected (CV mode)."""
         return self.left_lane is not None and self.right_lane is not None
 
     @property
     def has_any_lane(self) -> bool:
         """Check if at least one lane was detected."""
+        if self.lanes:
+            return len(self.lanes) > 0
         return self.left_lane is not None or self.right_lane is not None
+
+    @property
+    def has_segmentation(self) -> bool:
+        """Check if segmentation mask is available (DL detection)."""
+        return self.segmentation_mask is not None
+
+    @property
+    def num_lanes(self) -> int:
+        """Get number of detected lanes."""
+        if self.lanes:
+            return len(self.lanes)
+        count = 0
+        if self.left_lane:
+            count += 1
+        if self.right_lane:
+            count += 1
+        return count
 
 
 # =============================================================================
@@ -138,6 +200,15 @@ class ControlMessage:
     heading_angle: float | None = None
     lane_width_pixels: float | None = None
     departure_status: str | None = None
+
+    # Debug polynomial coefficients for viewer overlay (x = ay^2 + by + c)
+    left_poly: tuple | None = None    # (a, b, c) or None
+    right_poly: tuple | None = None   # (a, b, c) or None
+    center_poly: tuple | None = None  # (a, b, c) or None
+
+    # Lane boundary confidence scores [0, 1] (fit_quality * coverage)
+    left_confidence: float = 0.0
+    right_confidence: float = 0.0
 
     def clamp_values(self):
         """Ensure all control values are within valid ranges."""

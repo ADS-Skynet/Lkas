@@ -48,7 +48,6 @@ class DetectionClient:
         self,
         detection_shm_name: str,
         image_shm_name: Optional[str] = None,
-        image_shape: Optional[tuple] = None,
         retry_count: int = 20,
         retry_delay: float = 0.5
     ):
@@ -58,13 +57,11 @@ class DetectionClient:
         Args:
             detection_shm_name: Name of detection shared memory (for reading results)
             image_shm_name: Name of image shared memory (optional, for writing images)
-            image_shape: Image shape (height, width, channels) - required if image_shm_name provided
             retry_count: Number of retry attempts for connection (default: 20)
             retry_delay: Delay between retries in seconds (default: 0.5)
         """
         self.detection_shm_name = detection_shm_name
         self.image_shm_name = image_shm_name
-        self.image_shape = image_shape
 
         # Connect to detection shared memory (reader) with retry
         self._detection_channel = SharedMemoryDetectionChannel(
@@ -77,12 +74,8 @@ class DetectionClient:
         # Optionally connect to image channel (writer) if image_shm_name provided
         self._image_channel = None
         if image_shm_name is not None:
-            if image_shape is None:
-                raise ValueError("image_shape is required when image_shm_name is provided")
-
             self._image_channel = SharedMemoryImageChannel(
                 name=image_shm_name,
-                shape=image_shape,
                 create=False,  # Connect to existing shared memory created by detection server
                 retry_count=retry_count,
                 retry_delay=retry_delay
@@ -103,7 +96,7 @@ class DetectionClient:
         if self._image_channel is None:
             raise RuntimeError(
                 "Cannot send image: client was not initialized with image_shm_name. "
-                "Provide image_shm_name and image_shape during initialization."
+                "Provide image_shm_name during initialization."
             )
         self._image_channel.write(image, timestamp=timestamp, frame_id=frame_id)
 

@@ -8,6 +8,9 @@ Separates broadcasting concerns from main server logic.
 import sys
 import io
 import time
+import base64
+import cv2
+import numpy as np
 from typing import Optional, Dict
 
 
@@ -113,7 +116,6 @@ class BroadcastManager:
             try:
                 self.image_channel = SharedMemoryImageChannel(
                     name=self.image_shm_name,
-                    shape=(self.system_config.camera.height, self.system_config.camera.width, 3),
                     create=False,  # Reader mode
                     retry_count=1,
                     retry_delay=0.0,
@@ -231,7 +233,33 @@ class BroadcastManager:
             } if detection_msg.right_lane is not None else None,
             'processing_time_ms': detection_msg.processing_time_ms,
             'frame_id': detection_msg.frame_id,
+            'detection_method': getattr(detection_msg, 'detection_method', 'cv'),
         }
+
+        # Add segmentation mask if available (DL detection)
+        if hasattr(detection_msg, 'segmentation_mask') and detection_msg.segmentation_mask is not None:
+            mask = detection_msg.segmentation_mask
+            # Debug: Log mask stats before encoding
+            if not hasattr(self, '_broadcast_mask_debug_logged'):
+                nonzero = np.count_nonzero(mask)
+                # self.terminal.print(f"[Broadcast Debug] Mask before encoding: shape={mask.shape}, nonzero={nonzero}, max={mask.max()}")
+                self._broadcast_mask_debug_logged = True
+            # Compress mask as PNG for efficient transmission
+            success, encoded = cv2.imencode('.png', mask)
+            if success:
+                detection_data['segmentation_mask_base64'] = base64.b64encode(encoded.tobytes()).decode('utf-8')
+                detection_data['segmentation_mask_shape'] = list(mask.shape)
+
+        # Add multiple lane contours if available (DL detection)
+        if hasattr(detection_msg, 'lanes') and detection_msg.lanes is not None:
+            detection_data['lanes'] = [
+                lane.to_dict() if hasattr(lane, 'to_dict') else {
+                    'points': lane.points,
+                    'class_id': lane.class_id,
+                    'confidence': lane.confidence
+                }
+                for lane in detection_msg.lanes
+            ]
 
         # Add metrics from control message
         if control_msg is not None:
@@ -239,11 +267,24 @@ class BroadcastManager:
             detection_data['heading_angle_deg'] = control_msg.heading_angle
             detection_data['lane_width_pixels'] = control_msg.lane_width_pixels
             detection_data['departure_status'] = control_msg.departure_status
+
+            # Debug polynomial coefficients for viewer overlay
+            detection_data['left_poly'] = list(control_msg.left_poly) if control_msg.left_poly else None
+            detection_data['right_poly'] = list(control_msg.right_poly) if control_msg.right_poly else None
+            detection_data['center_poly'] = list(control_msg.center_poly) if control_msg.center_poly else None
+            # Lane boundary confidence scores
+            detection_data['left_confidence'] = control_msg.left_confidence
+            detection_data['right_confidence'] = control_msg.right_confidence
         else:
             detection_data['lateral_offset_meters'] = None
             detection_data['heading_angle_deg'] = None
             detection_data['lane_width_pixels'] = None
             detection_data['departure_status'] = None
+            detection_data['left_poly'] = None
+            detection_data['right_poly'] = None
+            detection_data['center_poly'] = None
+            detection_data['left_confidence'] = 0.0
+            detection_data['right_confidence'] = 0.0
 
             if self.verbose and detection_msg.frame_id % self.broadcast_log_interval == 0:
                 self.terminal.print(f"[Broker] Warning: No control data for frame {detection_msg.frame_id}")
@@ -252,20 +293,19 @@ class BroadcastManager:
 
     def _log_broadcast(self, detection_msg, detection_data, control_msg):
         """Log broadcast details."""
-        has_metrics = control_msg is not None
-        if has_metrics:
-            self.terminal.print(
-                f"[Broker] Frame {detection_msg.frame_id}: "
-                f"L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None} | "
-                f"Metrics: offset={detection_data['lateral_offset_meters']:.3f}m, "
-                f"status={detection_data['departure_status']}"
-            )
+        offset = detection_data.get('lateral_offset_meters')
+        status = detection_data.get('departure_status', 'N/A')
+
+        if offset is not None:
+            offset_str = f"{offset:.3f}m"
         else:
-            self.terminal.print(
-                f"[Broker] Frame {detection_msg.frame_id}: "
-                f"L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None} | "
-                f"Metrics: N/A"
-            )
+            offset_str = "N/A"
+
+        self.terminal.print(
+            f"[Broker] Frame {detection_msg.frame_id}: "
+            f"L:{detection_msg.left_lane is not None}, R:{detection_msg.right_lane is not None} | "
+            f"Metrics: offset={offset_str}, status={status}"
+        )
 
     def _update_fps(self):
         """Update FPS statistics."""

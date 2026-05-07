@@ -7,7 +7,7 @@ Standalone detector that processes images and returns lane detection results.
 import numpy as np
 import time
 
-from lkas.integration.shared_memory.messages import ImageMessage, DetectionMessage, LaneMessage
+from lkas.integration.shared_memory.messages import ImageMessage, DetectionMessage, LaneMessage, LaneContour
 from lkas.detection.core.factory import DetectorFactory
 from common.config import Config
 
@@ -74,6 +74,23 @@ class LaneDetection:
                 confidence=result.right_lane.confidence,
             )
 
+        # Get segmentation mask if available (DL detection)
+        segmentation_mask = None
+        if hasattr(self.detector, 'get_last_mask'):
+            segmentation_mask = self.detector.get_last_mask()
+
+        # Convert lane contours from DetectionResult to LaneContour messages
+        lanes_msg = None
+        if result.lanes:
+            lanes_msg = [
+                LaneContour(
+                    points=lane.points,
+                    class_id=lane.class_id,
+                    confidence=lane.confidence
+                )
+                for lane in result.lanes
+            ]
+
         # Create detection message
         # Note: No debug_image - viewer handles all overlays on laptop side
         detection_msg = DetectionMessage(
@@ -83,6 +100,9 @@ class LaneDetection:
             frame_id=image_msg.frame_id,
             timestamp=image_msg.timestamp,
             debug_image=None,  # Viewer draws overlays, not LKAS
+            segmentation_mask=segmentation_mask,
+            detection_method=self.method,
+            lanes=lanes_msg,
         )
 
         return detection_msg

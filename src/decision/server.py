@@ -60,10 +60,17 @@ class DecisionServer:
                 "steer_threshold": config.throttle_policy.steer_threshold,
                 "steer_max": config.throttle_policy.steer_max,
             },
+            camera_offset_x=config.camera.offset_x,
         )
+        # Set lookahead_ratio if Pure Pursuit controller
+        if config.controller.method.lower() == "pure_pursuit" and hasattr(self.controller.controller, 'lookahead_ratio'):
+            self.controller.controller.lookahead_ratio = config.controller.lookahead_ratio
+
         print(f"✓ Decision controller ready ({config.controller.method.upper()})")
         if config.controller.method == "pid":
             print(f"  PID Gains: Kp={config.controller.kp}, Ki={config.controller.ki}, Kd={config.controller.kd}")
+        elif config.controller.method == "pure_pursuit":
+            print(f"  Pure Pursuit: Gain={config.controller.kp}, Heading={config.controller.kd}, Lookahead={config.controller.lookahead_ratio}")
         else:
             print(f"  PD Gains: Kp={config.controller.kp}, Kd={config.controller.kd}")
         print(f"  Throttle: base={config.throttle_policy.base}, min={config.throttle_policy.min}")

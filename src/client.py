@@ -51,7 +51,6 @@ class LKASClient:
         image_shm_name: str = "camera_feed",
         detection_shm_name: str = "detection_results",
         control_shm_name: str = "control_commands",
-        image_shape: tuple = (600, 800, 3),
         retry_count: int = 20,
         retry_delay: float = 0.5
     ):
@@ -62,20 +61,17 @@ class LKASClient:
             image_shm_name: Shared memory name for camera images
             detection_shm_name: Shared memory name for lane detections
             control_shm_name: Shared memory name for control commands
-            image_shape: Camera image shape (height, width, channels)
             retry_count: Connection retry attempts (default: 20)
             retry_delay: Delay between retries in seconds (default: 0.5)
         """
         self.image_shm_name = image_shm_name
         self.detection_shm_name = detection_shm_name
         self.control_shm_name = control_shm_name
-        self.image_shape = image_shape
 
         # Initialize detection client (bidirectional: write images, read detections)
         self._detection_client = DetectionClient(
             detection_shm_name=detection_shm_name,
             image_shm_name=image_shm_name,
-            image_shape=image_shape,
             retry_count=retry_count,
             retry_delay=retry_delay
         )
@@ -147,14 +143,12 @@ class LKASSimple:
         image_shm_name: str = "camera_feed",
         detection_shm_name: str = "detection_results",
         control_shm_name: str = "control_commands",
-        image_shape: tuple = (600, 800, 3)
     ):
         """Initialize simplified LKAS with default settings."""
         self._lkas = LKASClient(
             image_shm_name=image_shm_name,
             detection_shm_name=detection_shm_name,
             control_shm_name=control_shm_name,
-            image_shape=image_shape
         )
 
     def send(self, image: np.ndarray, timestamp: float, frame_id: int) -> None:

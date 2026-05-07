@@ -101,33 +101,45 @@ class SharedDetectionHeader:
     has_left_lane: int
     has_right_lane: int
     ready: int  # 1 if new data available
+    detection_method: int  # 0=cv, 1=dl
+    lanes_json_size: int  # Size of lanes JSON data (0 if none)
+    mask_height: int  # Segmentation mask height (0 if none)
+    mask_width: int  # Segmentation mask width (0 if none)
 
     @staticmethod
     def byte_size():
         """Size in bytes: Calculate actual struct size with padding."""
-        return struct.calcsize('qddiii')
+        return struct.calcsize('qddiiiiiii')
 
     def pack(self) -> bytes:
         """Pack header to bytes."""
-        return struct.pack('qddiii',
+        return struct.pack('qddiiiiiii',
                           self.frame_id,
                           self.timestamp,
                           self.processing_time_ms,
                           self.has_left_lane,
                           self.has_right_lane,
-                          self.ready)
+                          self.ready,
+                          self.detection_method,
+                          self.lanes_json_size,
+                          self.mask_height,
+                          self.mask_width)
 
     @staticmethod
     def unpack(data: bytes) -> 'SharedDetectionHeader':
         """Unpack header from bytes."""
-        values = struct.unpack('qddiii', data)
+        values = struct.unpack('qddiiiiiii', data)
         return SharedDetectionHeader(
             frame_id=values[0],
             timestamp=values[1],
             processing_time_ms=values[2],
             has_left_lane=values[3],
             has_right_lane=values[4],
-            ready=values[5]
+            ready=values[5],
+            detection_method=values[6],
+            lanes_json_size=values[7],
+            mask_height=values[8],
+            mask_width=values[9]
         )
 
 
@@ -191,31 +203,34 @@ class SharedMemoryImageChannel:
     """
     High-performance shared memory channel for camera images.
 
+    Supports dynamic image resolutions up to 1920x1080. Actual dimensions
+    are communicated per-frame via the header, so writer and reader do not
+    need to agree on resolution at init time.
+
     Memory Layout:
-        [Header: 32 bytes][Image Data: width*height*channels bytes]
+        [Header: 32 bytes][Image Data: up to MAX_IMAGE_BYTES]
     """
 
-    def __init__(self, name: str, shape: tuple, create: bool = True, retry_count: int = 10, retry_delay: float = 0.5):
+    # Maximum image buffer: supports up to 1920x1080x3 (~6.2 MB)
+    MAX_IMAGE_BYTES = 1920 * 1080 * 3
+
+    def __init__(self, name: str, create: bool = True, retry_count: int = 10, retry_delay: float = 0.5):
         """
         Initialize shared memory image channel.
 
         Args:
             name: Unique name for shared memory
-            shape: Image shape (height, width, channels)
             create: True to create (writer), False to connect (reader)
             retry_count: Number of retry attempts for connection (default: 10)
             retry_delay: Delay between retries in seconds (default: 0.5)
         """
         self.name = name
-        self.shape = shape
-        self.height, self.width, self.channels = shape
         self._is_creator = create  # Track if we created this memory
         self._unregistered = False  # Track if we've unregistered from resource tracker
 
         # Calculate sizes
         self.header_size = SharedImageHeader.byte_size()
-        self.image_size = int(np.prod(shape))
-        self.total_size = self.header_size + self.image_size
+        self.total_size = self.header_size + self.MAX_IMAGE_BYTES
 
         # Create or connect to shared memory with retry logic
         if create:
@@ -240,15 +255,9 @@ class SharedMemoryImageChannel:
             for attempt in range(retry_count):
                 try:
                     self.shm = shared_memory.SharedMemory(name=name)
-                    # print(f"\n✓ Connected to image shared memory: {name}")
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
-                        # print(
-                        #     f"  Waiting for shared memory '{name}' "
-                        #     f"(attempt {attempt + 1}/{retry_count})...",
-                        #     end="\r", flush=True
-                        # )
                         time.sleep(retry_delay)
                     else:
                         raise ConnectionError(
@@ -258,11 +267,11 @@ class SharedMemoryImageChannel:
 
         # Create views
         self.header_view = self.shm.buf[:self.header_size]
-        self.image_view = np.ndarray(
-            shape,
-            dtype=np.uint8,
-            buffer=self.shm.buf[self.header_size:]
-        )
+        self.image_buf = self.shm.buf[self.header_size:]
+
+        # Cached ndarray views (recreated only when image shape changes)
+        self._cached_shape = None
+        self._cached_view = None
 
         # Synchronization
         self.lock = Lock()
@@ -270,9 +279,10 @@ class SharedMemoryImageChannel:
     def __del__(self):
         """Destructor - automatically cleanup when object is destroyed."""
         try:
-            # Release array views first
-            if hasattr(self, 'image_view'):
-                del self.image_view
+            if hasattr(self, '_cached_view'):
+                del self._cached_view
+            if hasattr(self, 'image_buf'):
+                del self.image_buf
             if hasattr(self, 'header_view'):
                 del self.header_view
         except Exception:
@@ -295,36 +305,53 @@ class SharedMemoryImageChannel:
                 except (KeyError, ValueError, AttributeError):
                     pass
 
+    def _get_view(self, shape):
+        """Get or create a cached ndarray view for the given shape."""
+        if self._cached_shape != shape:
+            self._cached_view = np.ndarray(
+                shape, dtype=np.uint8, buffer=self.shm.buf[self.header_size:]
+            )
+            self._cached_shape = shape
+        return self._cached_view
+
     def write(self, image: np.ndarray, timestamp: float, frame_id: int):
         """
-        Write image to shared memory.
+        Write image to shared memory. Accepts any image that fits in the buffer.
 
         Args:
-            image: Image array (must match shape)
+            image: Image array (any resolution up to max buffer size)
             timestamp: Image timestamp
             frame_id: Frame sequence number
         """
-        if image.shape != self.shape:
-            raise ValueError(f"Image shape {image.shape} != expected {self.shape}")
+        nbytes = image.nbytes
+        if nbytes > self.MAX_IMAGE_BYTES:
+            raise ValueError(
+                f"Image too large: {image.shape} = {nbytes} bytes "
+                f"(max {self.MAX_IMAGE_BYTES} bytes)"
+            )
+
+        h, w = image.shape[0], image.shape[1]
+        c = image.shape[2] if image.ndim == 3 else 1
 
         with self.lock:
-            # Write image data (fast memcpy)
-            np.copyto(self.image_view, image)
+            # Write image data using cached view for fast memcpy
+            view = self._get_view(image.shape)
+            np.copyto(view, image)
 
-            # Write header
+            # Write header with actual dimensions
             header = SharedImageHeader(
                 frame_id=frame_id,
                 timestamp=timestamp,
-                width=self.width,
-                height=self.height,
-                channels=self.channels,
+                width=w,
+                height=h,
+                channels=c,
                 ready=1
             )
             self.header_view[:] = header.pack()
 
     def read(self, copy: bool = True) -> Optional[ImageMessage]:
         """
-        Read image from shared memory.
+        Read image from shared memory. Reconstructs shape from header.
 
         Args:
             copy: If True, returns copy. If False, returns view (faster but unsafe)
@@ -340,15 +367,13 @@ class SharedMemoryImageChannel:
             if header.ready == 0:
                 return None
 
-            # Read image
-            if copy:
-                image = np.copy(self.image_view)
-            else:
-                image = self.image_view
+            shape = (header.height, header.width, header.channels)
+            view = self._get_view(shape)
 
-            # Mark as consumed (optional - comment out for multiple readers)
-            # header.ready = 0
-            # self.header_view[:] = header.pack()
+            if copy:
+                image = np.copy(view)
+            else:
+                image = view
 
             return ImageMessage(
                 image=image,
@@ -378,9 +403,10 @@ class SharedMemoryImageChannel:
     def close(self):
         """Close shared memory and unregister from resource tracker."""
         try:
-            # Release array views first
-            if hasattr(self, 'image_view'):
-                del self.image_view
+            if hasattr(self, '_cached_view'):
+                del self._cached_view
+            if hasattr(self, 'image_buf'):
+                del self.image_buf
             if hasattr(self, 'header_view'):
                 del self.header_view
         except Exception:
@@ -421,8 +447,14 @@ class SharedMemoryDetectionChannel:
     High-performance shared memory channel for detection results.
 
     Memory Layout:
-        [Header: 40 bytes][Left Lane: 24 bytes][Right Lane: 24 bytes]
+        [Header: 56 bytes][Left Lane: 24 bytes][Right Lane: 24 bytes][Lanes JSON: 64KB][Mask: ~1MB]
     """
+
+    # Maximum size for lanes JSON data (64KB should be plenty for lane contours)
+    LANES_JSON_MAX_SIZE = 65536
+
+    # Maximum size for segmentation mask (720 * 1280 = 921,600 bytes for typical image)
+    MASK_MAX_SIZE = 1280 * 720  # ~1MB for single-channel mask
 
     def __init__(self, name: str, create: bool = True, retry_count: int = 10, retry_delay: float = 0.5):
         """
@@ -441,7 +473,9 @@ class SharedMemoryDetectionChannel:
         # Calculate sizes
         self.header_size = SharedDetectionHeader.byte_size()
         self.lane_size = SharedLane.byte_size()
-        self.total_size = self.header_size + 2 * self.lane_size  # header + 2 lanes
+        self.lanes_json_offset = self.header_size + 2 * self.lane_size
+        self.mask_offset = self.lanes_json_offset + self.LANES_JSON_MAX_SIZE
+        self.total_size = self.mask_offset + self.MASK_MAX_SIZE
 
         # Create or connect to shared memory with retry logic
         if create:
@@ -487,6 +521,8 @@ class SharedMemoryDetectionChannel:
         self.header_view = self.shm.buf[:self.header_size]
         self.left_lane_view = self.shm.buf[self.header_size:self.header_size + self.lane_size]
         self.right_lane_view = self.shm.buf[self.header_size + self.lane_size:self.header_size + 2 * self.lane_size]
+        self.lanes_json_view = self.shm.buf[self.lanes_json_offset:self.lanes_json_offset + self.LANES_JSON_MAX_SIZE]
+        self.mask_view = self.shm.buf[self.mask_offset:self.mask_offset + self.MASK_MAX_SIZE]
 
         # Synchronization
         self.lock = Lock()
@@ -501,6 +537,10 @@ class SharedMemoryDetectionChannel:
                 del self.left_lane_view
             if hasattr(self, 'right_lane_view'):
                 del self.right_lane_view
+            if hasattr(self, 'lanes_json_view'):
+                del self.lanes_json_view
+            if hasattr(self, 'mask_view'):
+                del self.mask_view
         except Exception:
             pass
 
@@ -529,6 +569,41 @@ class SharedMemoryDetectionChannel:
             detection: Detection message
         """
         with self.lock:
+            # Serialize lanes to JSON if available
+            lanes_json_size = 0
+            if detection.lanes:
+                lanes_data = [
+                    {
+                        'points': lane.points,
+                        'class_id': lane.class_id,
+                        'confidence': lane.confidence
+                    }
+                    for lane in detection.lanes
+                ]
+                lanes_json = json.dumps(lanes_data).encode('utf-8')
+                lanes_json_size = len(lanes_json)
+                if lanes_json_size <= self.LANES_JSON_MAX_SIZE:
+                    self.lanes_json_view[:lanes_json_size] = lanes_json
+                else:
+                    # Truncate if too large (shouldn't happen normally)
+                    lanes_json_size = 0
+
+            # Handle segmentation mask
+            mask_height = 0
+            mask_width = 0
+            if detection.segmentation_mask is not None:
+                mask = detection.segmentation_mask
+                mask_height, mask_width = mask.shape[:2]
+                mask_size = mask_height * mask_width
+                if mask_size <= self.MASK_MAX_SIZE:
+                    # Debug: Log mask stats before writing (once)
+                    if not hasattr(self, '_write_mask_debug_logged'):
+                        nonzero = np.count_nonzero(mask)
+                        # print(f"[SHM Write Debug] Mask: shape={mask.shape}, nonzero={nonzero}, max={mask.max()}")
+                        self._write_mask_debug_logged = True
+                    # Write mask data as flat bytes
+                    self.mask_view[:mask_size] = mask.flatten().tobytes()
+
             # Write header
             header = SharedDetectionHeader(
                 frame_id=detection.frame_id,
@@ -536,7 +611,11 @@ class SharedMemoryDetectionChannel:
                 processing_time_ms=detection.processing_time_ms,
                 has_left_lane=1 if detection.left_lane else 0,
                 has_right_lane=1 if detection.right_lane else 0,
-                ready=1
+                ready=1,
+                detection_method=1 if detection.detection_method == 'dl' else 0,
+                lanes_json_size=lanes_json_size,
+                mask_height=mask_height,
+                mask_width=mask_width
             )
             self.header_view[:] = header.pack()
 
@@ -576,6 +655,45 @@ class SharedMemoryDetectionChannel:
                 right = SharedLane.unpack(bytes(self.right_lane_view))
                 right_lane = right.to_lane_message()
 
+            # Read lanes JSON data (DL detection)
+            lanes = None
+            if header.lanes_json_size > 0 and header.lanes_json_size <= self.LANES_JSON_MAX_SIZE:
+                try:
+                    lanes_json = bytes(self.lanes_json_view[:header.lanes_json_size]).decode('utf-8')
+                    lanes_data = json.loads(lanes_json)
+                    # Convert to LaneContour objects
+                    from .messages import LaneContour
+                    lanes = [
+                        LaneContour(
+                            points=lane['points'],
+                            class_id=lane['class_id'],
+                            confidence=lane['confidence']
+                        )
+                        for lane in lanes_data
+                    ]
+                except (json.JSONDecodeError, UnicodeDecodeError, KeyError) as e:
+                    # Stale/corrupted data in shared memory - ignore lanes
+                    lanes = None
+
+            # Read segmentation mask (DL detection)
+            segmentation_mask = None
+            if header.mask_height > 0 and header.mask_width > 0:
+                mask_size = header.mask_height * header.mask_width
+                if mask_size <= self.MASK_MAX_SIZE:
+                    try:
+                        mask_bytes = bytes(self.mask_view[:mask_size])
+                        segmentation_mask = np.frombuffer(mask_bytes, dtype=np.uint8).reshape(
+                            (header.mask_height, header.mask_width)
+                        ).copy()  # Copy to avoid shared memory buffer issues
+                        # Debug: Log mask stats after reading (once)
+                        if not hasattr(self, '_read_mask_debug_logged'):
+                            nonzero = np.count_nonzero(segmentation_mask)
+                            # print(f"[SHM Read Debug] Mask: shape={segmentation_mask.shape}, nonzero={nonzero}, max={segmentation_mask.max()}")
+                            self._read_mask_debug_logged = True
+                    except (ValueError, TypeError):
+                        # Corrupted mask data - ignore
+                        segmentation_mask = None
+
             # Mark as consumed (optional)
             # header.ready = 0
             # self.header_view[:] = header.pack()
@@ -586,7 +704,10 @@ class SharedMemoryDetectionChannel:
                 processing_time_ms=header.processing_time_ms,
                 frame_id=header.frame_id,
                 timestamp=header.timestamp,
-                debug_image=None  # Not transmitted via shared memory (too large)
+                debug_image=None,  # Not transmitted via shared memory (too large)
+                segmentation_mask=segmentation_mask,
+                detection_method='dl' if header.detection_method == 1 else 'cv',
+                lanes=lanes
             )
 
     def close(self):
@@ -599,6 +720,10 @@ class SharedMemoryDetectionChannel:
                 del self.left_lane_view
             if hasattr(self, 'right_lane_view'):
                 del self.right_lane_view
+            if hasattr(self, 'lanes_json_view'):
+                del self.lanes_json_view
+            if hasattr(self, 'mask_view'):
+                del self.mask_view
         except Exception:
             pass
 
@@ -728,7 +853,7 @@ class SharedControlData:
     """
     Control command data.
 
-    Memory layout (88 bytes):
+    Memory layout (176 bytes):
     - steering: 8 bytes (double) - Range [-1.0, 1.0]
     - throttle: 8 bytes (double) - Range [0.0, 1.0]
     - brake: 8 bytes (double) - Range [0.0, 1.0]
@@ -736,6 +861,11 @@ class SharedControlData:
     - lateral_offset_meters: 8 bytes (double) - Lateral offset in meters
     - heading_angle: 8 bytes (double) - Heading angle in degrees
     - lane_width_pixels: 8 bytes (double) - Lane width in pixels
+    - left_confidence: 8 bytes (double) - Left boundary confidence [0, 1]
+    - right_confidence: 8 bytes (double) - Right boundary confidence [0, 1]
+    - left_poly (a,b,c): 24 bytes - Left boundary polynomial x=f(y) (NaN = unavailable)
+    - right_poly (a,b,c): 24 bytes - Right boundary polynomial x=f(y) (NaN = unavailable)
+    - center_poly (a,b,c): 24 bytes - Center path polynomial x=f(y) (NaN = unavailable)
     - departure_status: 32 bytes (string) - Lane departure status string
     """
     steering: float
@@ -745,15 +875,32 @@ class SharedControlData:
     lateral_offset_meters: float
     heading_angle: float
     lane_width_pixels: float
-    departure_status: str
+    # Lane boundary confidence scores
+    left_confidence: float = 0.0
+    right_confidence: float = 0.0
+    # Debug polynomial coefficients for viewer overlay (NaN = not available)
+    left_poly_a: float = float('nan')
+    left_poly_b: float = float('nan')
+    left_poly_c: float = float('nan')
+    right_poly_a: float = float('nan')
+    right_poly_b: float = float('nan')
+    right_poly_c: float = float('nan')
+    center_poly_a: float = float('nan')
+    center_poly_b: float = float('nan')
+    center_poly_c: float = float('nan')
+    departure_status: str = ''
+
+    # Struct format: 18 doubles + 32-byte string
+    _FORMAT = 'dddddddddddddddddd32s'
 
     @staticmethod
     def byte_size():
-        """Size in bytes: 7 doubles + 32 char string = 88 bytes"""
-        return struct.calcsize('ddddddd32s')
+        """Size in bytes: 18 doubles + 32 char string = 176 bytes"""
+        return struct.calcsize('dddddddddddddddddd32s')
 
     def pack(self) -> bytes:
         """Pack control data to bytes."""
+        import math
         # Convert None to 0.0 for numeric fields
         lateral_offset_m = self.lateral_offset_meters if self.lateral_offset_meters is not None else 0.0
         heading = self.heading_angle if self.heading_angle is not None else 0.0
@@ -764,7 +911,7 @@ class SharedControlData:
         status_bytes = status_bytes.ljust(32, b'\x00')
 
         return struct.pack(
-            'ddddddd32s',
+            self._FORMAT,
             self.steering,
             self.throttle,
             self.brake,
@@ -772,16 +919,22 @@ class SharedControlData:
             lateral_offset_m,
             heading,
             lane_width,
+            self.left_confidence,
+            self.right_confidence,
+            self.left_poly_a, self.left_poly_b, self.left_poly_c,
+            self.right_poly_a, self.right_poly_b, self.right_poly_c,
+            self.center_poly_a, self.center_poly_b, self.center_poly_c,
             status_bytes
         )
 
     @staticmethod
     def unpack(data: bytes) -> 'SharedControlData':
         """Unpack control data from bytes."""
-        values = struct.unpack('ddddddd32s', data)
+        import math
+        values = struct.unpack(SharedControlData._FORMAT, data)
 
         # Decode status string
-        status_str = values[7].rstrip(b'\x00').decode('utf-8') if values[7] else None
+        status_str = values[18].rstrip(b'\x00').decode('utf-8') if values[18] else None
 
         return SharedControlData(
             steering=values[0],
@@ -791,11 +944,23 @@ class SharedControlData:
             lateral_offset_meters=values[4] if values[4] != 0.0 else None,
             heading_angle=values[5] if values[5] != 0.0 else None,
             lane_width_pixels=values[6] if values[6] != 0.0 else None,
+            left_confidence=values[7],
+            right_confidence=values[8],
+            left_poly_a=values[9], left_poly_b=values[10], left_poly_c=values[11],
+            right_poly_a=values[12], right_poly_b=values[13], right_poly_c=values[14],
+            center_poly_a=values[15], center_poly_b=values[16], center_poly_c=values[17],
             departure_status=status_str
         )
 
     def to_control_message(self, frame_id: int, timestamp: float, mode: ControlMode) -> ControlMessage:
         """Convert to ControlMessage."""
+        import math
+
+        def _poly_or_none(a, b, c):
+            if math.isnan(a) or math.isnan(b) or math.isnan(c):
+                return None
+            return (a, b, c)
+
         return ControlMessage(
             steering=self.steering,
             throttle=self.throttle,
@@ -805,12 +970,22 @@ class SharedControlData:
             lateral_offset_meters=self.lateral_offset_meters,
             heading_angle=self.heading_angle,
             lane_width_pixels=self.lane_width_pixels,
-            departure_status=self.departure_status
+            departure_status=self.departure_status,
+            left_poly=_poly_or_none(self.left_poly_a, self.left_poly_b, self.left_poly_c),
+            right_poly=_poly_or_none(self.right_poly_a, self.right_poly_b, self.right_poly_c),
+            center_poly=_poly_or_none(self.center_poly_a, self.center_poly_b, self.center_poly_c),
+            left_confidence=self.left_confidence,
+            right_confidence=self.right_confidence,
         )
 
     @staticmethod
     def from_control_message(control: ControlMessage) -> 'SharedControlData':
         """Create from ControlMessage."""
+        nan = float('nan')
+        lp = control.left_poly or (nan, nan, nan)
+        rp = control.right_poly or (nan, nan, nan)
+        cp = control.center_poly or (nan, nan, nan)
+
         return SharedControlData(
             steering=control.steering,
             throttle=control.throttle,
@@ -819,6 +994,11 @@ class SharedControlData:
             lateral_offset_meters=control.lateral_offset_meters,
             heading_angle=control.heading_angle,
             lane_width_pixels=control.lane_width_pixels,
+            left_confidence=control.left_confidence,
+            right_confidence=control.right_confidence,
+            left_poly_a=lp[0], left_poly_b=lp[1], left_poly_c=lp[2],
+            right_poly_a=rp[0], right_poly_b=rp[1], right_poly_c=rp[2],
+            center_poly_a=cp[0], center_poly_b=cp[1], center_poly_c=cp[2],
             departure_status=control.departure_status
         )
 
@@ -856,7 +1036,7 @@ class SharedMemoryControlChannel:
     High-performance shared memory channel for control commands.
 
     Memory Layout:
-        [Header: 48 bytes][Control Data: 88 bytes] = 136 bytes total
+        [Header: 48 bytes][Control Data: 160 bytes] = 208 bytes total
 
     Usage:
         # Writer (Decision Process)
