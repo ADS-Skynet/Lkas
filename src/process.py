@@ -259,6 +259,11 @@ class DecisionProcessManager(ProcessManager):
         retry_delay: float,
         verbose: bool,
         buffer_read_size: int = 4096,
+        # Planner-specific params
+        controller_method: Optional[str] = None,
+        planner_model: Optional[str] = None,
+        scenario: int = 0,
+        planner_device: str = "cpu",
     ):
         super().__init__(logger, retry_count, retry_delay, buffer_read_size)
 
@@ -266,6 +271,10 @@ class DecisionProcessManager(ProcessManager):
         self.detection_shm_name = detection_shm_name
         self.control_shm_name = control_shm_name
         self.verbose = verbose
+        self.controller_method = controller_method
+        self.planner_model = planner_model
+        self.scenario = scenario
+        self.planner_device = planner_device
 
     def build_command(self) -> List[str]:
         """Build command for decision server."""
@@ -288,6 +297,16 @@ class DecisionProcessManager(ProcessManager):
 
         if not self.verbose:
             cmd.append("--no-stats")
+
+        if self.controller_method:
+            cmd.extend(["--controller-method", self.controller_method])
+
+        if self.planner_model:
+            cmd.extend(["--planner-model", self.planner_model])
+
+        if self.controller_method == "planner":
+            cmd.extend(["--scenario", str(self.scenario)])
+            cmd.extend(["--planner-device", self.planner_device])
 
         return cmd
 

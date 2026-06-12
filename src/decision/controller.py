@@ -15,6 +15,7 @@ from lkas.decision.lane_analyzer import LaneAnalyzer
 from lkas.decision.segmentation_lane_parser import SegmentationLaneParser
 from lkas.decision.core.factory import ControllerFactory
 from lkas.decision.core.interfaces import SteeringController
+from lkas.decision.method.planner_controller import PlannerDecisionMethod, DEFAULT_MODEL_PATH
 
 
 class DecisionController:
@@ -39,6 +40,10 @@ class DecisionController:
         throttle_policy: dict | None = None,
         config=None,
         camera_offset_x: int = 0,
+        # Planner-specific params (only used when controller_method == "planner")
+        model_path: str | None = None,
+        scenario: int = 0,
+        planner_device: str = "cpu",
     ):
         """
         Initialize decision controller.
@@ -49,7 +54,7 @@ class DecisionController:
             kp: Proportional gain for steering control
             ki: Integral gain for steering control (PID only)
             kd: Derivative gain for steering control
-            controller_method: Controller type ('pd', 'pid', 'mpc', etc.)
+            controller_method: Controller type ('pd', 'pid', 'mpc', 'planner', etc.)
             throttle_policy: Adaptive throttle configuration dict with keys:
                 - base: Base throttle value (default: 0.45)
                 - min: Minimum throttle value (default: 0.18)
@@ -57,38 +62,50 @@ class DecisionController:
                 - steer_max: Maximum steering for throttle calculation (default: 0.70)
             config: Optional system configuration object
             camera_offset_x: Pixel offset of camera center from vehicle center
+            model_path: Path to planner_model.pth (planner method only)
+            scenario: Scenario token for planner (0 = LANE_FOLLOW)
+            planner_device: Torch device for planner inference ("cpu" recommended)
         """
         self.camera_offset_x = camera_offset_x
+        self.controller_method = controller_method.lower()
 
         # Lane analysis (CV detection path)
         self.analyzer = LaneAnalyzer(image_width=image_width, image_height=image_height)
 
-        # Segmentation lane parser (DL detection path)
+        # Segmentation lane parser (DL detection path, hand-tuned controllers only)
         self.seg_parser = SegmentationLaneParser(
             image_width=image_width,
             image_height=image_height,
             camera_offset_x=camera_offset_x,
         )
 
-        # Steering control - use factory pattern for instantiation
-        self.controller_method = controller_method.lower()
-        factory = ControllerFactory(config=config)
+        # ── Planner path (end-to-end neural network) ──────────────────────────
+        self._planner: PlannerDecisionMethod | None = None
+        self.controller: SteeringController | None = None
 
-        # Create controller with appropriate parameters
-        controller_params = {"kp": kp, "kd": kd}
-        if self.controller_method == "pid":
-            controller_params["ki"] = ki
-        elif self.controller_method == "pure_pursuit":
-            controller_params["image_width"] = image_width
-            controller_params["image_height"] = image_height
-            controller_params["camera_offset_x"] = camera_offset_x
+        if self.controller_method == "planner":
+            self._planner = PlannerDecisionMethod(
+                model_path=model_path or DEFAULT_MODEL_PATH,
+                scenario=scenario,
+                device=planner_device,
+            )
+        else:
+            # ── Hand-tuned controller path ─────────────────────────────────────
+            factory = ControllerFactory(config=config)
+            controller_params = {"kp": kp, "kd": kd}
+            if self.controller_method == "pid":
+                controller_params["ki"] = ki
+            elif self.controller_method == "pure_pursuit":
+                controller_params["image_width"] = image_width
+                controller_params["image_height"] = image_height
+                controller_params["camera_offset_x"] = camera_offset_x
 
-        self.controller: SteeringController = factory.create(
-            controller_type=self.controller_method,
-            **controller_params
-        )
+            self.controller = factory.create(
+                controller_type=self.controller_method,
+                **controller_params
+            )
 
-        # Adaptive throttle policy
+        # Adaptive throttle policy (used by hand-tuned controllers; planner outputs throttle directly)
         self.throttle_policy = throttle_policy or {
             "base": 0.15,
             "min": 0.05,
@@ -139,10 +156,10 @@ class DecisionController:
         """
         Process detection results and generate control commands.
 
-        Handles two detection paths:
-        - DL detection: Parse segmentation mask via SegmentationLaneParser,
-          optionally provide center path polynomial to Pure Pursuit controller
-        - CV detection: Use traditional LaneAnalyzer with left/right lane endpoints
+        Handles three detection paths:
+        - Planner (e2e): lane_grid (pre-computed) → PlannerModel → (steering, throttle)
+        - DL + hand-tuned: mask → SegmentationLaneParser → LaneMetrics → PID/PD/PurePursuit
+        - CV: left/right lane endpoints → LaneAnalyzer → LaneMetrics → PID/PD
 
         Args:
             detection: Lane detection message
@@ -150,6 +167,32 @@ class DecisionController:
         Returns:
             Control message with steering, throttle, brake commands
         """
+        # ── Planner path ──────────────────────────────────────────────────────
+        if self._planner is not None:
+            if detection.lane_grid is not None:
+                # Prefer pre-computed grid produced by the detection server
+                steering, throttle = self._planner.infer(lane_grid=detection.lane_grid)
+                brake = 0.0
+            elif detection.segmentation_mask is not None:
+                # Fallback: compute grid here (planner-e2e unavailable on detection side)
+                steering, throttle = self._planner.infer(mask=detection.segmentation_mask)
+                brake = 0.0
+            else:
+                # No lane features — hold neutral and apply light brake
+                steering = 0.0
+                throttle = 0.0
+                brake = 0.3
+
+            control = ControlMessage(
+                steering=steering,
+                throttle=throttle,
+                brake=brake,
+                mode=self.mode,
+            )
+            control.clamp_values()
+            return control
+
+        # ── Hand-tuned controller paths ───────────────────────────────────────
         if detection.detection_method == "dl" and detection.segmentation_mask is not None:
             # DL path: parse segmentation mask into polynomial lane boundaries
             metrics = self.seg_parser.parse(detection.segmentation_mask)
@@ -180,17 +223,14 @@ class DecisionController:
 
             metrics = self.analyzer.get_metrics(left_lane, right_lane)
 
-        # Compute steering from metrics (works with any controller)
+        # Compute steering from metrics
         steering = self.controller.compute_steering(metrics)
 
-        # If no steering computed (e.g., no lanes detected), use safe default
         if steering is None:
             steering = 0.0
-            # Apply brake when no lanes detected
             throttle = 0.0
             brake = 0.3
         else:
-            # Use adaptive throttle if enabled, otherwise use default
             if self.use_adaptive_throttle:
                 throttle = self.compute_adaptive_throttle(steering)
             else:
@@ -215,7 +255,6 @@ class DecisionController:
                 center_poly = tuple(cp)
             left_conf, right_conf = self.seg_parser.get_confidences()
 
-        # Create control message with complete metrics
         control = ControlMessage(
             steering=steering,
             throttle=throttle,
@@ -233,9 +272,7 @@ class DecisionController:
             right_confidence=right_conf,
         )
 
-        # Ensure values are clamped
         control.clamp_values()
-
         return control
 
     def set_control_mode(self, mode: ControlMode):
@@ -249,21 +286,21 @@ class DecisionController:
 
     def set_controller_gains(self, kp: float, ki: float | None = None, kd: float | None = None):
         """
-        Update controller gains.
+        Update controller gains (no-op in planner mode).
 
         Args:
             kp: Proportional gain
             ki: Integral gain (for PID only, optional)
             kd: Derivative gain (optional)
         """
+        if self.controller is None:
+            return
         if self.controller_method == "pid":
-            # For PID, set all three gains
             current_gains = self.controller.get_gains()
             ki_val = ki if ki is not None else current_gains[1]
             kd_val = kd if kd is not None else current_gains[2]
             self.controller.set_gains(kp, ki_val, kd_val)
         else:
-            # For PD, only set kp and kd
             kd_val = kd if kd is not None else self.controller.get_gains()[1]
             self.controller.set_gains(kp, kd_val)
 
@@ -272,8 +309,11 @@ class DecisionController:
         Get current controller gains.
 
         Returns:
-            Tuple of (kp, kd) for PD or (kp, ki, kd) for PID
+            Tuple of (kp, kd) for PD or (kp, ki, kd) for PID.
+            Returns empty tuple in planner mode.
         """
+        if self.controller is None:
+            return ()
         return self.controller.get_gains()
 
     def get_analyzer(self) -> LaneAnalyzer:
@@ -289,7 +329,10 @@ class DecisionController:
             - Starting a new session
             - After significant disturbance
         """
-        self.controller.reset_state()
+        if self._planner is not None:
+            self._planner.reset_state()
+        if self.controller is not None:
+            self.controller.reset_state()
         self.seg_parser.reset()
 
     def update_parameter(self, param_name: str, value: float) -> bool:
@@ -307,6 +350,14 @@ class DecisionController:
         if param_name == 'reset':
             self.reset_state()
             return True
+
+        # Planner method: no tunable gains; only scenario can be updated
+        if self._planner is not None:
+            if param_name == 'scenario':
+                self._planner.set_scenario(int(value))
+                return True
+            print(f"⚠ Parameter '{param_name}' is not applicable in planner mode")
+            return False
 
         # Map of valid parameters and their value constraints
         valid_params = {

@@ -37,9 +37,7 @@ from .lane_analyzer import LaneAnalyzer
 from .segmentation_lane_parser import SegmentationLaneParser
 from .client import DecisionClient
 from .core import ControllerFactory, SteeringController
-
-# Expose method-level controllers for backward compatibility
-from .method import PDController, PIDController, PurePursuitController
+from .method import PDController, PIDController, PurePursuitController, PlannerDecisionMethod
 
 __all__ = [
     'DecisionController',
@@ -48,6 +46,7 @@ __all__ = [
     'PDController',
     'PIDController',
     'PurePursuitController',
+    'PlannerDecisionMethod',
     'LaneAnalyzer',
     'SegmentationLaneParser',
     'DecisionClient',

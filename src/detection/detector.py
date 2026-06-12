@@ -74,10 +74,14 @@ class LaneDetection:
                 confidence=result.right_lane.confidence,
             )
 
-        # Get segmentation mask if available (DL detection)
+        # Get segmentation mask and pre-computed lane grid if available (DL detection)
         segmentation_mask = None
         if hasattr(self.detector, 'get_last_mask'):
             segmentation_mask = self.detector.get_last_mask()
+
+        lane_grid = None
+        if hasattr(self.detector, 'get_last_lane_grid'):
+            lane_grid = self.detector.get_last_lane_grid()
 
         # Convert lane contours from DetectionResult to LaneContour messages
         lanes_msg = None
@@ -103,6 +107,7 @@ class LaneDetection:
             segmentation_mask=segmentation_mask,
             detection_method=self.method,
             lanes=lanes_msg,
+            lane_grid=lane_grid,
         )
 
         return detection_msg

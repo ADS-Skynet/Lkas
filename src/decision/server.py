@@ -28,6 +28,11 @@ class DecisionServer:
         retry_delay: float = 0.5,
         enable_parameter_updates: bool = True,
         parameter_broker_url: str = "tcp://localhost:5560",
+        # Planner-specific params (forwarded to DecisionController when method == "planner")
+        controller_method_override: str | None = None,
+        model_path: str | None = None,
+        scenario: int = 0,
+        planner_device: str = "cpu",
     ):
         """
         Initialize decision server.
@@ -40,10 +45,16 @@ class DecisionServer:
             retry_delay: Delay between retries (seconds)
             enable_parameter_updates: Enable real-time parameter updates via ZMQ
             parameter_broker_url: ZMQ URL for parameter broker
+            controller_method_override: Override config.controller.method (e.g. "planner")
+            model_path: Path to planner_model.pth (planner method only)
+            scenario: Scenario token for planner (0 = LANE_FOLLOW)
+            planner_device: Torch device for planner inference ("cpu" recommended)
         """
         print("\n" + "=" * 60)
         print("Decision Server")
         print("=" * 60)
+
+        effective_method = controller_method_override or config.controller.method
 
         # Initialize decision controller
         print(f"\nInitializing decision controller...")
@@ -53,7 +64,7 @@ class DecisionServer:
             kp=config.controller.kp,
             ki=config.controller.ki,
             kd=config.controller.kd,
-            controller_method=config.controller.method,
+            controller_method=effective_method,
             throttle_policy={
                 "base": config.throttle_policy.base,
                 "min": config.throttle_policy.min,
@@ -61,15 +72,21 @@ class DecisionServer:
                 "steer_max": config.throttle_policy.steer_max,
             },
             camera_offset_x=config.camera.offset_x,
+            model_path=model_path,
+            scenario=scenario,
+            planner_device=planner_device,
         )
         # Set lookahead_ratio if Pure Pursuit controller
-        if config.controller.method.lower() == "pure_pursuit" and hasattr(self.controller.controller, 'lookahead_ratio'):
+        if effective_method.lower() == "pure_pursuit" and hasattr(self.controller.controller, 'lookahead_ratio'):
             self.controller.controller.lookahead_ratio = config.controller.lookahead_ratio
 
-        print(f"✓ Decision controller ready ({config.controller.method.upper()})")
-        if config.controller.method == "pid":
+        print(f"✓ Decision controller ready ({effective_method.upper()})")
+        if effective_method == "planner":
+            print(f"  Model: {model_path or '(default planner_model.pth)'}")
+            print(f"  Scenario: {scenario}  Device: {planner_device}")
+        elif effective_method == "pid":
             print(f"  PID Gains: Kp={config.controller.kp}, Ki={config.controller.ki}, Kd={config.controller.kd}")
-        elif config.controller.method == "pure_pursuit":
+        elif effective_method == "pure_pursuit":
             print(f"  Pure Pursuit: Gain={config.controller.kp}, Heading={config.controller.kd}, Lookahead={config.controller.lookahead_ratio}")
         else:
             print(f"  PD Gains: Kp={config.controller.kp}, Kd={config.controller.kd}")

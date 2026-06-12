@@ -45,7 +45,7 @@ def main():
         "--gpu",
         type=int,
         default=None,
-        help="GPU device ID (for DL method)",
+        help="GPU device ID (for DL detection method)",
     )
     parser.add_argument(
         "--broadcast",
@@ -58,7 +58,37 @@ def main():
         help="Enable verbose output (FPS stats, latency info)",
     )
 
+    # Decision controller override
+    parser.add_argument(
+        "--decision-method",
+        type=str,
+        default=None,
+        help="Override decision controller method (e.g. 'planner', 'pid', 'pd', 'pure_pursuit')",
+    )
+    parser.add_argument(
+        "--planner-model",
+        type=str,
+        default=None,
+        help="Path to planner_model.pth (planner decision method only)",
+    )
+    parser.add_argument(
+        "--scenario",
+        type=int,
+        default=0,
+        help="Scenario token for planner (0=LANE_FOLLOW, default: 0)",
+    )
+    parser.add_argument(
+        "--planner-device",
+        type=str,
+        default="cpu",
+        help="Torch device for planner inference (default: cpu)",
+    )
+
     args = parser.parse_args()
+
+    # Planner requires DL detection (needs the segmentation mask)
+    if args.decision_method == "planner" and args.method != "dl":
+        print("⚠ Warning: --decision-method planner works best with --method dl (needs segmentation mask)")
 
     # Create and run launcher
     launcher = LKASServer(
@@ -67,6 +97,10 @@ def main():
         gpu=args.gpu,
         broadcast=args.broadcast,
         verbose=args.verbose,
+        decision_method=args.decision_method,
+        planner_model=args.planner_model,
+        scenario=args.scenario,
+        planner_device=args.planner_device,
     )
 
     return launcher.run()

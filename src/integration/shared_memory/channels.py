@@ -105,15 +105,16 @@ class SharedDetectionHeader:
     lanes_json_size: int  # Size of lanes JSON data (0 if none)
     mask_height: int  # Segmentation mask height (0 if none)
     mask_width: int  # Segmentation mask width (0 if none)
+    has_lane_grid: int  # 1 if lane grid data is present
 
     @staticmethod
     def byte_size():
         """Size in bytes: Calculate actual struct size with padding."""
-        return struct.calcsize('qddiiiiiii')
+        return struct.calcsize('qddiiiiiiii')
 
     def pack(self) -> bytes:
         """Pack header to bytes."""
-        return struct.pack('qddiiiiiii',
+        return struct.pack('qddiiiiiiii',
                           self.frame_id,
                           self.timestamp,
                           self.processing_time_ms,
@@ -123,12 +124,13 @@ class SharedDetectionHeader:
                           self.detection_method,
                           self.lanes_json_size,
                           self.mask_height,
-                          self.mask_width)
+                          self.mask_width,
+                          self.has_lane_grid)
 
     @staticmethod
     def unpack(data: bytes) -> 'SharedDetectionHeader':
         """Unpack header from bytes."""
-        values = struct.unpack('qddiiiiiii', data)
+        values = struct.unpack('qddiiiiiiii', data)
         return SharedDetectionHeader(
             frame_id=values[0],
             timestamp=values[1],
@@ -139,7 +141,8 @@ class SharedDetectionHeader:
             detection_method=values[6],
             lanes_json_size=values[7],
             mask_height=values[8],
-            mask_width=values[9]
+            mask_width=values[9],
+            has_lane_grid=values[10]
         )
 
 
@@ -447,7 +450,7 @@ class SharedMemoryDetectionChannel:
     High-performance shared memory channel for detection results.
 
     Memory Layout:
-        [Header: 56 bytes][Left Lane: 24 bytes][Right Lane: 24 bytes][Lanes JSON: 64KB][Mask: ~1MB]
+        [Header][Left Lane: 24B][Right Lane: 24B][Lanes JSON: 64KB][Mask: ~1MB][Lane Grid: 576B]
     """
 
     # Maximum size for lanes JSON data (64KB should be plenty for lane contours)
@@ -455,6 +458,10 @@ class SharedMemoryDetectionChannel:
 
     # Maximum size for segmentation mask (720 * 1280 = 921,600 bytes for typical image)
     MASK_MAX_SIZE = 1280 * 720  # ~1MB for single-channel mask
+
+    # Lane spatial grid: GRID_ROWS × GRID_COLS = 72 float64 values (576 bytes)
+    LANE_GRID_FEATURES = 72
+    LANE_GRID_SIZE = LANE_GRID_FEATURES * 8  # 8 bytes per float64
 
     def __init__(self, name: str, create: bool = True, retry_count: int = 10, retry_delay: float = 0.5):
         """
@@ -475,7 +482,8 @@ class SharedMemoryDetectionChannel:
         self.lane_size = SharedLane.byte_size()
         self.lanes_json_offset = self.header_size + 2 * self.lane_size
         self.mask_offset = self.lanes_json_offset + self.LANES_JSON_MAX_SIZE
-        self.total_size = self.mask_offset + self.MASK_MAX_SIZE
+        self.lane_grid_offset = self.mask_offset + self.MASK_MAX_SIZE
+        self.total_size = self.lane_grid_offset + self.LANE_GRID_SIZE
 
         # Create or connect to shared memory with retry logic
         if create:
@@ -523,6 +531,7 @@ class SharedMemoryDetectionChannel:
         self.right_lane_view = self.shm.buf[self.header_size + self.lane_size:self.header_size + 2 * self.lane_size]
         self.lanes_json_view = self.shm.buf[self.lanes_json_offset:self.lanes_json_offset + self.LANES_JSON_MAX_SIZE]
         self.mask_view = self.shm.buf[self.mask_offset:self.mask_offset + self.MASK_MAX_SIZE]
+        self.lane_grid_view = self.shm.buf[self.lane_grid_offset:self.lane_grid_offset + self.LANE_GRID_SIZE]
 
         # Synchronization
         self.lock = Lock()
@@ -541,6 +550,8 @@ class SharedMemoryDetectionChannel:
                 del self.lanes_json_view
             if hasattr(self, 'mask_view'):
                 del self.mask_view
+            if hasattr(self, 'lane_grid_view'):
+                del self.lane_grid_view
         except Exception:
             pass
 
@@ -604,6 +615,13 @@ class SharedMemoryDetectionChannel:
                     # Write mask data as flat bytes
                     self.mask_view[:mask_size] = mask.flatten().tobytes()
 
+            # Handle lane grid (pre-computed by detection server)
+            has_lane_grid = 0
+            if detection.lane_grid is not None and len(detection.lane_grid) == self.LANE_GRID_FEATURES:
+                grid_bytes = struct.pack(f'{self.LANE_GRID_FEATURES}d', *detection.lane_grid)
+                self.lane_grid_view[:self.LANE_GRID_SIZE] = grid_bytes
+                has_lane_grid = 1
+
             # Write header
             header = SharedDetectionHeader(
                 frame_id=detection.frame_id,
@@ -615,7 +633,8 @@ class SharedMemoryDetectionChannel:
                 detection_method=1 if detection.detection_method == 'dl' else 0,
                 lanes_json_size=lanes_json_size,
                 mask_height=mask_height,
-                mask_width=mask_width
+                mask_width=mask_width,
+                has_lane_grid=has_lane_grid,
             )
             self.header_view[:] = header.pack()
 
@@ -691,8 +710,18 @@ class SharedMemoryDetectionChannel:
                             # print(f"[SHM Read Debug] Mask: shape={segmentation_mask.shape}, nonzero={nonzero}, max={segmentation_mask.max()}")
                             self._read_mask_debug_logged = True
                     except (ValueError, TypeError):
-                        # Corrupted mask data - ignore
                         segmentation_mask = None
+
+            # Read lane grid (pre-computed by detection server)
+            lane_grid = None
+            if header.has_lane_grid:
+                try:
+                    lane_grid = list(struct.unpack(
+                        f'{self.LANE_GRID_FEATURES}d',
+                        bytes(self.lane_grid_view[:self.LANE_GRID_SIZE])
+                    ))
+                except struct.error:
+                    lane_grid = None
 
             # Mark as consumed (optional)
             # header.ready = 0
@@ -707,7 +736,8 @@ class SharedMemoryDetectionChannel:
                 debug_image=None,  # Not transmitted via shared memory (too large)
                 segmentation_mask=segmentation_mask,
                 detection_method='dl' if header.detection_method == 1 else 'cv',
-                lanes=lanes
+                lanes=lanes,
+                lane_grid=lane_grid,
             )
 
     def close(self):
@@ -724,6 +754,8 @@ class SharedMemoryDetectionChannel:
                 del self.lanes_json_view
             if hasattr(self, 'mask_view'):
                 del self.mask_view
+            if hasattr(self, 'lane_grid_view'):
+                del self.lane_grid_view
         except Exception:
             pass
 

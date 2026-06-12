@@ -16,6 +16,16 @@ import sys
 from lkas.detection.core.interfaces import LaneDetector
 from common.types.models import Lane, LaneContour, DetectionResult
 
+# Import build_lane_grid from planner-e2e (optional: only when planner-e2e is present)
+_PLANNER_E2E = Path(__file__).resolve().parents[5] / "planner-e2e"
+_build_lane_grid = None
+try:
+    if str(_PLANNER_E2E) not in sys.path:
+        sys.path.insert(0, str(_PLANNER_E2E))
+    from planner_model import build_lane_grid as _build_lane_grid  # noqa: E402
+except ImportError:
+    pass
+
 
 class DLLaneDetector(LaneDetector):
     """
@@ -84,8 +94,9 @@ class DLLaneDetector(LaneDetector):
         self._frame_count = 0
         self._warmup_frames = 30
 
-        # Cache for visualization
+        # Cache for visualization and downstream consumers
         self._last_mask: Optional[np.ndarray] = None
+        self._last_lane_grid: Optional[list] = None
 
         # ImageNet normalization (as torch tensors for faster processing)
         self._mean = torch.tensor([0.485, 0.456, 0.406], device=self.device).view(1, 3, 1, 1)
@@ -193,8 +204,9 @@ class DLLaneDetector(LaneDetector):
             interpolation=cv2.INTER_NEAREST
         )
 
-        # Store mask for visualization
+        # Store mask and pre-compute lane grid for planner
         self._last_mask = mask
+        self._last_lane_grid = _build_lane_grid(mask) if _build_lane_grid is not None else None
 
         # Extract multiple lane contours from mask (for DL)
         lane_contours = self._extract_lane_contours(mask)
@@ -476,6 +488,16 @@ class DLLaneDetector(LaneDetector):
             Segmentation mask (H, W) with class indices, or None
         """
         return self._last_mask
+
+    def get_last_lane_grid(self) -> Optional[list]:
+        """
+        Get the pre-computed lane grid from the last detection.
+
+        Returns:
+            List of LANE_FEATURES floats (GRID_ROWS × GRID_COLS lane fractions), or None
+            if planner-e2e is not available.
+        """
+        return self._last_lane_grid
 
     def update_parameter(self, name: str, value: float) -> bool:
         """

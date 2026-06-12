@@ -50,6 +50,11 @@ class LKASServer:
         # Broadcasting configuration
         jpeg_quality: int | None = None,
         broadcast_log_interval: int | None = None,
+        # Decision controller (planner-specific)
+        decision_method: str | None = None,
+        planner_model: str | None = None,
+        scenario: int = 0,
+        planner_device: str = "cpu",
     ):
         """Initialize LKAS launcher."""
         # Core configuration
@@ -58,6 +63,10 @@ class LKASServer:
         self.gpu = gpu
         self.verbose = verbose
         self.broadcast = broadcast
+        self.decision_method = decision_method
+        self.planner_model = planner_model
+        self.scenario = scenario
+        self.planner_device = planner_device
 
         # Load config
         self.system_config = ConfigManager.load(self.config)
@@ -137,6 +146,10 @@ class LKASServer:
             retry_delay=self.retry_delay,
             verbose=self.verbose,
             buffer_read_size=self.system_config.launcher.buffer_read_size,
+            controller_method=self.decision_method,
+            planner_model=self.planner_model,
+            scenario=self.scenario,
+            planner_device=self.planner_device,
         )
 
         # Broadcast manager
@@ -191,6 +204,8 @@ class LKASServer:
         self.terminal.print(title_padding + "LKAS System Launcher")
         self.terminal.print(separator)
         self.terminal.print(f"  Detection Method: {self.method.upper()}")
+        if self.decision_method:
+            self.terminal.print(f"  Decision Method: {self.decision_method.upper()}")
         if self.gpu is not None:
             self.terminal.print(f"  GPU Device: {self.gpu}")
         if self.config:

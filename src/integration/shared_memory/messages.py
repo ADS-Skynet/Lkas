@@ -132,6 +132,7 @@ class DetectionMessage:
     segmentation_mask: np.ndarray | None = None  # For DL visualization
     detection_method: str = "cv"  # 'cv' or 'dl'
     lanes: list | None = None  # List of LaneContour for DL detection
+    lane_grid: list | None = None  # Spatial lane-fraction grid (GRID_ROWS×GRID_COLS floats)
 
     @property
     def has_both_lanes(self) -> bool:

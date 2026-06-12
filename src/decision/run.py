@@ -87,10 +87,37 @@ def main():
         help="Disable FPS and latency statistics output",
     )
 
+    # Decision controller method (overrides config.controller.method)
+    parser.add_argument(
+        "--controller-method",
+        type=str,
+        default=None,
+        help="Override controller method from config (e.g. 'planner', 'pid', 'pd', 'pure_pursuit')",
+    )
+
+    # Planner-specific arguments
+    parser.add_argument(
+        "--planner-model",
+        type=str,
+        default=None,
+        help="Path to planner_model.pth (planner method only; defaults to planner-e2e/planner_model.pth)",
+    )
+    parser.add_argument(
+        "--scenario",
+        type=int,
+        default=0,
+        help="Scenario token for planner (0=LANE_FOLLOW, default: 0)",
+    )
+    parser.add_argument(
+        "--planner-device",
+        type=str,
+        default="cpu",
+        help="Torch device for planner inference (default: cpu)",
+    )
+
     args = parser.parse_args()
 
     # Load configuration
-    # print("Loading configuration...")
     config = ConfigManager.load(args.config)
     print(f"✓ Configuration loaded")
 
@@ -105,6 +132,10 @@ def main():
         control_shm_name=control_shm_name,
         retry_count=args.retry_count,
         retry_delay=args.retry_delay,
+        controller_method_override=args.controller_method,
+        model_path=args.planner_model,
+        scenario=args.scenario,
+        planner_device=args.planner_device,
     )
 
     server.run(print_stats=not args.no_stats)
