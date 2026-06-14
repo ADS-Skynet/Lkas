@@ -91,14 +91,8 @@ class VehicleBroadcaster:
             ])
         else:
             # Compress to JPEG (10x smaller for network transfer)
-            if image.shape[2] == 3:
-                # Assume RGB, convert to BGR for OpenCV
-                image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            else:
-                image_bgr = image
-
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
-            success, buffer = cv2.imencode('.jpg', image_bgr, encode_param)
+            success, buffer = cv2.imencode('.jpg', image, encode_param)
 
             if not success:
                 return

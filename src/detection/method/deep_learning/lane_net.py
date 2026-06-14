@@ -25,9 +25,9 @@ class DLLaneDetector(LaneDetector):
     the existing decision pipeline (LaneAnalyzer).
     """
 
-    # Default model path (relative to lane-detection-dl)
-    DEFAULT_MODEL_PATH = Path(__file__).parent.parent.parent.parent.parent.parent / \
-                         "lane-detection-dl" / "inference" / "bisenet-0203.pth"
+    # Project root and default model path — both absolute, CWD-independent
+    _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent.parent
+    DEFAULT_MODEL_PATH = _PROJECT_ROOT / "lane-detection-dl" / "inference" / "bisenet-0204.pth"
 
     def __init__(
         self,
@@ -59,9 +59,10 @@ class DLLaneDetector(LaneDetector):
         self.n_classes = n_classes
         self.smoothing_factor = smoothing_factor
 
-        # Resolve model path
+        # Resolve model path — relative paths are anchored to project root
         if model_path:
-            self.model_path = Path(model_path)
+            p = Path(model_path)
+            self.model_path = p if p.is_absolute() else (self._PROJECT_ROOT / p).resolve()
         else:
             self.model_path = self.DEFAULT_MODEL_PATH
 

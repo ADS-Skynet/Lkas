@@ -11,7 +11,7 @@ from typing import Optional
 SHM_NAME = "/rt_control_shm"
 SHM_PATH = "/dev/shm/rt_control_shm"
 MAGIC = 0x5243544C  # 'RCTL'
-VERSION = 1
+VERSION = 2
 RING_CAPACITY = 64
 
 
