@@ -129,6 +129,19 @@ class DecisionServer:
             self.param_sub.register_callback(self._on_parameter_update)
             print(f"✓ Parameter updates enabled")
 
+        # Optional RT control SHM writer (LKAS -> DCAS raw control)
+        self._rt_writer = None
+        try:
+            from lkas.integration.rt_control_shm import RtControlShmWriter
+
+            self._rt_writer = RtControlShmWriter()
+            if self._rt_writer.is_ready():
+                print("✓ rt_control_shm writer ready (LKAS -> DCAS)")
+            else:
+                print("⚠ rt_control_shm not available (LKAS raw control not published)")
+        except Exception:
+            self._rt_writer = None
+
     def _on_parameter_update(self, param_name: str, value: float):
         """
         Handle real-time parameter update.
@@ -188,6 +201,13 @@ class DecisionServer:
                         processing_time_ms=processing_time_ms
                     )
 
+                    # Publish raw control to rt_control_shm for DCAS filtering
+                    if self._rt_writer:
+                        self._rt_writer.write_lkas_to_dcas(
+                            throttle=control.throttle,
+                            steering=control.steering,
+                        )
+
                     self.frame_count += 1
 
                     # Stats tracking (only if enabled)
@@ -226,4 +246,6 @@ class DecisionServer:
         self.detection_channel.close()
         self.control_channel.close()
         self.control_channel.unlink()
+        if self._rt_writer:
+            self._rt_writer.close()
         print("✓ Decision server stopped")
